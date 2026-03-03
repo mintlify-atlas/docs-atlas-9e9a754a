@@ -1,0 +1,123 @@
+{
+  "projectType": "framework",
+  "projectName": "ForkBB",
+  "projectDescription": "A free and open source forum software built on PHP with modern MVC architecture",
+  "theme": "linden",
+  "primaryColor": "#3b5998",
+  "lightColor": "#5b7fc8",
+  "darkColor": "#2d4373",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "configuration"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "architecture",
+              "routing",
+              "models",
+              "controllers",
+              "views",
+              "container"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/user-management",
+              "features/forums-topics",
+              "features/private-messaging",
+              "features/search",
+              "features/moderation",
+              "features/bbcode"
+            ]
+          },
+          {
+            "group": "Extensions",
+            "pages": [
+              "extensions/overview",
+              "extensions/creating",
+              "extensions/events"
+            ]
+          },
+          {
+            "group": "Administration",
+            "pages": [
+              "admin/panel-overview",
+              "admin/user-management",
+              "admin/forum-management",
+              "admin/permissions"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/container",
+              "api/router",
+              "api/validator",
+              "api/database"
+            ]
+          },
+          {
+            "group": "Models",
+            "pages": [
+              "api/models/user",
+              "api/models/forum",
+              "api/models/topic",
+              "api/models/post"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "api/cli-commands"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "MVC architecture with dependency injection",
+    "Flexible routing system with URL-friendly paths",
+    "Multi-database support (MySQL, PostgreSQL, SQLite)",
+    "Private messaging system",
+    "BBCode parser with custom tags",
+    "Full-text search capabilities",
+    "User groups and permissions",
+    "Moderation tools and reporting",
+    "OAuth authentication support",
+    "Extension system for plugins",
+    "Template system with multiple themes",
+    "CLI commands for installation and maintenance"
+  ],
+  "publicApiSurface": [
+    "ForkBB\\Core\\Container - Dependency injection container",
+    "ForkBB\\Core\\Router - URL routing and link generation",
+    "ForkBB\\Core\\DB - Database abstraction layer",
+    "ForkBB\\Core\\Validator - Form validation",
+    "ForkBB\\Core\\Parser - BBCode parsing",
+    "ForkBB\\Models\\User\\User - User model",
+    "ForkBB\\Models\\Forum\\Forum - Forum model",
+    "ForkBB\\Models\\Topic\\Topic - Topic model",
+    "ForkBB\\Models\\Post\\Post - Post model",
+    "ForkBB\\Models\\PM\\PM - Private messaging",
+    "ForkBB\\Models\\Search\\Search - Search functionality",
+    "cli.php install - Installation command",
+    "cli.php send_mail - Mail queue processing"
+  ]
+}
