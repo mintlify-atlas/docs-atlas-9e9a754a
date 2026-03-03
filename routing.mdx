@@ -319,7 +319,7 @@ $validUrl = $c->Router->validate(
 
 ### Forums
 
-```
+```text
 /                              - Homepage (forum index)
 /forum/{id}/{name}[/{page}]    - View forum
 /forum/{id}/new/topic          - Create new topic
@@ -328,7 +328,7 @@ $validUrl = $c->Router->validate(
 
 ### Topics
 
-```
+```text
 /topic/{id}/{name}[/{page}]    - View topic
 /topic/{id}/view/new           - Jump to first new post
 /topic/{id}/view/last          - Jump to last post
@@ -337,7 +337,7 @@ $validUrl = $c->Router->validate(
 
 ### Posts
 
-```
+```text
 /post/{id}#p{id}               - View specific post
 /post/{id}/edit                - Edit post
 /post/{id}/delete              - Delete post
@@ -346,7 +346,7 @@ $validUrl = $c->Router->validate(
 
 ### Users
 
-```
+```text
 /userlist                      - List users
 /user/{id}/{name}              - View profile
 /user/{id}/edit/profile        - Edit profile
@@ -354,7 +354,7 @@ $validUrl = $c->Router->validate(
 
 ### Search
 
-```
+```text
 /search                        - Search form
 /search/simple/{keywords}[/{page}]          - Simple search
 /search/advanced[/{params}][/{page}]        - Advanced search

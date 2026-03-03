@@ -117,22 +117,22 @@ $router->add(
 ### Route Parameter Syntax
 
 **Basic Parameter:**
-```
+```text
 {name}
 ```
 
 **Typed Parameter (integer):**
-```
+```text
 {id|i:[1-9]\d*}
 ```
 
 **Custom Pattern:**
-```
+```text
 {action:(?!search)[a-z_]+}
 ```
 
 **Parameter Format:**
-```
+```text
 {name|type:pattern}
 ```
 
@@ -152,7 +152,7 @@ $router->add(
 **Optional Parameters:**
 
 Wrap optional segments in square brackets:
-```
+```text
 /path[/optional[/nested]]
 ```
 
