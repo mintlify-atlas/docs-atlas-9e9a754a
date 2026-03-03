@@ -1,0 +1,521 @@
+---
+title: Dependency Injection Container
+description: Service container, dependency injection, and service registration in ForkBB
+icon: 'box'
+---
+
+## Overview
+
+The **Container** is the heart of ForkBB's architecture. It provides:
+
+- **Dependency injection** for loose coupling
+- **Service registration** with shared and multiple instances
+- **Lazy loading** for performance
+- **Parameter substitution** for configuration
+- **Factory methods** for complex initialization
+
+<Note>
+The Container is based on the [artoodetoo/container](https://github.com/artoodetoo/container) library.
+</Note>
+
+## Container Class
+
+The Container class is located at `app/Core/Container.php`:
+
+```php app/Core/Container.php
+class Container
+{
+    protected array $instances = [];  // Instantiated services
+    protected array $shared = [];     // Shared service definitions
+    protected array $multiple = [];   // Multiple instance definitions
+    
+    public function __construct(array $config = [])
+    {
+        if (isset($config['shared'])) {
+            $this->shared = $config['shared'];
+        }
+        
+        if (isset($config['multiple'])) {
+            $this->multiple = $config['multiple'];
+        }
+        
+        $this->instances = $config;
+    }
+    
+    // Get service or parameter
+    public function __get(string $key): mixed
+    
+    // Set service or parameter
+    public function __set(string $key, mixed $service): void
+    
+    // Check if service is initialized
+    public function isInit(string $name): bool
+}
+```
+
+## Service Registration
+
+Services are registered in configuration files:
+
+```php app/config/main.dist.php
+return [
+    // Simple parameters
+    'BASE_URL' => 'https://example.com',
+    'DEBUG' => 0,
+    'MAX_POST_SIZE' => 65536,
+    
+    // Shared services (singletons)
+    'shared' => [
+        // Strings become class names
+        'Validator' => \ForkBB\Core\Validator::class,
+        'Lang' => \ForkBB\Core\Lang::class,
+        
+        // Arrays provide constructor parameters
+        'DB' => [
+            'class'    => \ForkBB\Core\DB::class,
+            'dsn'      => '%DB_DSN%',
+            'username' => '%DB_USERNAME%',
+            'password' => '%DB_PASSWORD%',
+            'options'  => '%DB_OPTIONS%',
+            'prefix'   => '%DB_PREFIX%',
+        ],
+        
+        // Factory methods
+        'user' => '@users:current',
+        'config' => '@ConfigModel:init',
+    ],
+    
+    // Multiple instance services (not cached)
+    'multiple' => [
+        'Topic' => \ForkBB\Models\Topic\Topic::class,
+        'Post' => \ForkBB\Models\Post\Post::class,
+    ],
+];
+```
+
+## Service Types
+
+<Tabs>
+  <Tab title="Simple Parameters">
+    ```php
+    // Configuration values
+    'BASE_URL' => 'https://example.com',
+    'DEBUG' => 0,
+    'MAX_POST_SIZE' => 65536,
+    
+    // Access
+    $url = $c->BASE_URL;
+    $debug = $c->DEBUG;
+    ```
+  </Tab>
+  
+  <Tab title="Shared Services">
+    ```php
+    'shared' => [
+        // Single instance (singleton)
+        'DB' => \ForkBB\Core\DB::class,
+        'Cache' => \ForkBB\Core\Cache\FileCache::class,
+        
+        // With constructor parameters
+        'Router' => [
+            'class' => \ForkBB\Core\Router::class,
+            'base_url' => '%BASE_URL%',
+            'csrf' => '@Csrf',
+        ],
+    ],
+    
+    // Access (lazy loaded, cached)
+    $db = $c->DB;      // Creates instance
+    $db2 = $c->DB;     // Returns same instance
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Instances">
+    ```php
+    'multiple' => [
+        // New instance each time
+        'Topic' => \ForkBB\Models\Topic\Topic::class,
+        'Post' => \ForkBB\Models\Post\Post::class,
+    ],
+    
+    // Access (not cached)
+    $topic1 = $c->Topic;  // Creates new instance
+    $topic2 = $c->Topic;  // Creates another new instance
+    ```
+  </Tab>
+  
+  <Tab title="Factory Methods">
+    ```php
+    'shared' => [
+        // Call method on service
+        'user' => '@users:current',
+        'config' => '@ConfigModel:init',
+        
+        // Equivalent to:
+        // $c->user = $c->users->current();
+        // $c->config = $c->ConfigModel->init();
+    ],
+    ```
+  </Tab>
+</Tabs>
+
+## Parameter Substitution
+
+The container supports parameter substitution using `%param%` syntax:
+
+```php
+'BASE_URL' => 'https://example.com',
+'DB_DSN' => 'mysql:host=localhost;dbname=forum',
+'DB_PREFIX' => 'forum_',
+
+'shared' => [
+    'DB' => [
+        'class' => \ForkBB\Core\DB::class,
+        'dsn' => '%DB_DSN%',          // Substituted with 'mysql:host=...'
+        'prefix' => '%DB_PREFIX%',    // Substituted with 'forum_'
+    ],
+    
+    'Router' => [
+        'class' => \ForkBB\Core\Router::class,
+        'base_url' => '%BASE_URL%',   // Substituted with 'https://...'
+    ],
+],
+```
+
+<AccordionGroup>
+  <Accordion title="Whole String Substitution">
+    Replace entire parameter value.
+    
+    ```php
+    'dsn' => '%DB_DSN%'  // Replaces with actual DSN value
+    ```
+  </Accordion>
+  
+  <Accordion title="Partial String Substitution">
+    Embed parameters in strings.
+    
+    ```php
+    'path' => '%DIR_ROOT%/public/uploads'  // Combines parameter + string
+    ```
+  </Accordion>
+  
+  <Accordion title="Service References">
+    Reference other services with `@service`.
+    
+    ```php
+    'csrf' => '@Csrf'  // Injects Csrf service
+    ```
+  </Accordion>
+  
+  <Accordion title="Nested Parameters">
+    Access nested array values with dot notation.
+    
+    ```php
+    'HMAC' => [
+        'algo' => 'sha1',
+        'salt' => 'random_salt',
+    ],
+    
+    'Secury' => [
+        'class' => \ForkBB\Core\Secury::class,
+        'hmac' => '%HMAC%',          // Entire array
+        'algo' => '%HMAC.algo%',     // Just 'sha1'
+    ],
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Accessing Services
+
+### Basic Access
+
+```php
+// Get service (lazy loaded)
+$db = $c->DB;
+$router = $c->Router;
+$user = $c->user;
+
+// Set service/parameter
+$c->myService = new MyService();
+$c->someValue = 123;
+
+// Check if initialized
+if ($c->isInit('DB')) {
+    $c->DB->disconnect();
+}
+```
+
+### Nested Access
+
+```php
+// Access nested parameters with dot notation
+$algo = $c->{'HMAC.algo'};  // Get 'HMAC' => 'algo'
+$value = $c->{'config.a.b'};  // Get nested array value
+```
+
+### Dependency Injection
+
+All services automatically receive the container:
+
+```php
+class MyService
+{
+    public function __construct(protected Container $c)
+    {
+    }
+    
+    public function doSomething()
+    {
+        // Access other services
+        $db = $this->c->DB;
+        $user = $this->c->user;
+        $router = $this->c->Router;
+        
+        // Access configuration
+        $debug = $this->c->DEBUG;
+        $baseUrl = $this->c->BASE_URL;
+    }
+}
+```
+
+## Configuration Structure
+
+### Directory Paths
+
+```php
+'shared' => [
+    '%DIR_ROOT%'   => \realpath(__DIR__ . '/../..'),
+    '%DIR_PUBLIC%' => '%DIR_ROOT%/public',
+    '%DIR_APP%'    => '%DIR_ROOT%/app',
+    '%DIR_CACHE%'  => '%DIR_APP%/cache',
+    '%DIR_CONFIG%' => '%DIR_APP%/config',
+    '%DIR_LANG%'   => '%DIR_APP%/lang',
+    '%DIR_LOG%'    => '%DIR_APP%/log',
+    '%DIR_VIEWS%'  => '%DIR_APP%/templates',
+],
+```
+
+### Core Services
+
+```php
+'shared' => [
+    'DB' => [
+        'class'    => \ForkBB\Core\DB::class,
+        'dsn'      => '%DB_DSN%',
+        'username' => '%DB_USERNAME%',
+        'password' => '%DB_PASSWORD%',
+        'options'  => '%DB_OPTIONS%',
+        'prefix'   => '%DB_PREFIX%',
+    ],
+    
+    'Cache' => [
+        'class'      => \ForkBB\Core\Cache\FileCache::class,
+        'cache_dir'  => '%DIR_CACHE%',
+        'reset_mark' => '%DB_DSN% %DB_PREFIX%',
+    ],
+    
+    'Router' => [
+        'class'    => \ForkBB\Core\Router::class,
+        'base_url' => '%BASE_URL%',
+        'csrf'     => '@Csrf',
+    ],
+    
+    'View' => [
+        'class'  => \ForkBB\Core\View::class,
+        'config' => [
+            'cache'      => '%DIR_CACHE%',
+            'defaultDir' => '%DIR_VIEWS%/_default',
+            'userDir'    => '%DIR_VIEWS%/_user',
+        ],
+    ],
+],
+```
+
+### Model Managers
+
+```php
+'shared' => [
+    'users'         => \ForkBB\Models\User\Users::class,
+    'forums'        => '@ForumManager:init',
+    'topics'        => \ForkBB\Models\Topic\Topics::class,
+    'posts'         => \ForkBB\Models\Post\Posts::class,
+    'groups'        => '@GroupManager:init',
+    'categories'    => '@CategoriesManager:init',
+    
+    // Current user (via factory)
+    'user'          => '@users:current',
+    'userRules'     => '@UsersRules:init',
+],
+```
+
+## Service Lifecycle
+
+<Steps>
+  <Step title="Container Creation">
+    Configuration loaded, parameters registered
+  </Step>
+  
+  <Step title="First Access">
+    Service definition located, dependencies resolved
+  </Step>
+  
+  <Step title="Instantiation">
+    Service class instantiated with container injected
+  </Step>
+  
+  <Step title="Caching (Shared)">
+    Instance stored for reuse
+  </Step>
+  
+  <Step title="Subsequent Access">
+    Cached instance returned (shared) or new instance created (multiple)
+  </Step>
+</Steps>
+
+## Example: Registering a Custom Service
+
+### Step 1: Create Service Class
+
+```php app/MyExtension/MyService.php
+namespace MyExtension;
+
+use ForkBB\Core\Container;
+
+class MyService
+{
+    public function __construct(protected Container $c)
+    {
+    }
+    
+    public function doSomething(): string
+    {
+        $user = $this->c->user;
+        return "Hello, {$user->username}!";
+    }
+}
+```
+
+### Step 2: Register in Container
+
+```php config/main.php
+'shared' => [
+    // Simple registration
+    'MyService' => \MyExtension\MyService::class,
+    
+    // With configuration
+    'MyService' => [
+        'class' => \MyExtension\MyService::class,
+        'apiKey' => '%MY_API_KEY%',
+        'cache' => '@Cache',
+    ],
+],
+```
+
+### Step 3: Use Service
+
+```php
+// In controller or other service
+$result = $this->c->MyService->doSomething();
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Type Hints">
+    Always type hint the Container parameter.
+    
+    ```php
+    public function __construct(protected Container $c) {}
+    ```
+  </Accordion>
+  
+  <Accordion title="Lazy Load Services">
+    Services are automatically lazy loaded. Don't instantiate in constructor.
+    
+    ```php
+    // Good - lazy loaded when needed
+    public function doWork() {
+        $db = $this->c->DB;
+    }
+    
+    // Bad - loaded immediately
+    public function __construct(protected Container $c) {
+        $this->db = $c->DB;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Shared for Singletons">
+    Services that maintain state should be shared.
+    
+    ```php
+    'shared' => [
+        'DB' => ...,     // Connection should be shared
+        'Cache' => ...,  // Cache should be shared
+        'user' => ...,   // Current user should be shared
+    ]
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Multiple for Models">
+    Domain models should be multiple instances.
+    
+    ```php
+    'multiple' => [
+        'Topic' => \ForkBB\Models\Topic\Topic::class,
+        'Post' => \ForkBB\Models\Post\Post::class,
+    ]
+    ```
+  </Accordion>
+  
+  <Accordion title="Check Initialization">
+    Check if expensive services are initialized before cleanup.
+    
+    ```php
+    if ($c->isInit('DB')) {
+        $c->DB->disconnect();
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Advanced Features
+
+### Dynamic Service Registration
+
+```php
+// Add configuration at runtime
+$c->config([
+    'shared' => [
+        'NewService' => \My\NewService::class,
+    ],
+]);
+```
+
+### Service Override
+
+```php
+// Override existing service
+$c->DB = new MyCustomDB();
+
+// Or reconfigure
+$c->config([
+    'shared' => [
+        'DB' => \My\CustomDB::class,
+    ],
+]);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="diagram-project" href="/architecture">
+    Understand how the container fits into ForkBB
+  </Card>
+  <Card title="Models" icon="database" href="/models">
+    Create services that use models
+  </Card>
+  <Card title="Controllers" icon="gears" href="/controllers">
+    Access services in controllers
+  </Card>
+</CardGroup>

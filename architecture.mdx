@@ -1,0 +1,285 @@
+---
+title: Architecture
+description: Understanding ForkBB's MVC architecture and application structure
+icon: 'diagram-project'
+---
+
+## Overview
+
+ForkBB is built on a **Model-View-Controller (MVC)** architecture with a powerful **dependency injection container** at its core. The framework emphasizes separation of concerns, testability, and extensibility.
+
+## Core Components
+
+<CardGroup cols={2}>
+  <Card title="Container" icon="box">
+    Service container for dependency injection
+  </Card>
+  <Card title="Router" icon="route">
+    URL routing and link generation
+  </Card>
+  <Card title="Models" icon="database">
+    Data layer and business logic
+  </Card>
+  <Card title="Controllers" icon="gears">
+    Request handling and orchestration
+  </Card>
+  <Card title="Views" icon="eye">
+    Template rendering system
+  </Card>
+  <Card title="Events" icon="bolt">
+    Event-driven architecture
+  </Card>
+</CardGroup>
+
+## Application Bootstrap Flow
+
+The application starts from `bootstrap.php`, which initializes the framework and handles requests:
+
+```php app/bootstrap.php
+// 1. Load dependencies
+$loader = require __DIR__ . '/../vendor/autoload.php';
+$errorHandler = new ErrorHandler();
+
+// 2. Initialize container with configuration
+if (\is_file(__DIR__ . '/config/main.php')) {
+    $c = new Container(include __DIR__ . '/config/main.php');
+} elseif (\is_file(__DIR__ . '/config/install.php')) {
+    $c = new Container(include __DIR__ . '/config/install.php');
+} else {
+    throw new RuntimeException('Application is not configured');
+}
+
+// 3. Setup error handling
+$errorHandler->setContainer($c);
+\ForkBB\_init($c);
+
+// 4. Configure URLs (https/http detection)
+if (!empty($_SERVER['HTTPS']) && 'off' !== \strtolower($_SERVER['HTTPS'])) {
+    $c->BASE_URL = \str_replace('http://', 'https://', $c->BASE_URL);
+} else {
+    $c->BASE_URL = \str_replace('https://', 'http://', $c->BASE_URL);
+}
+
+// 5. Dispatch bootstrap event
+$c->dispatcher = new EventDispatcher($c);
+$event = new Event('bootstrap:start');
+$event->controllers = ['Primary', 'Routing'];
+$c->dispatcher->dispatch($event);
+
+// 6. Execute controllers to get page
+foreach ($event->controllers as $controller) {
+    $page = $c->{$controller};
+    if ($page instanceof Page) {
+        break;
+    }
+}
+
+// 7. Calculate online users
+if (null !== $page->onlinePos) {
+    $c->Online->calc($page);
+}
+
+// 8. Prepare page for rendering
+if (null !== $page->nameTpl) {
+    $page->prepare();
+}
+
+// 9. Close database connection
+if ($c->isInit('DB')) {
+    if ($c->DB->inTransaction()) {
+        $c->DB->commit();
+    }
+    $c->DB->disconnect();
+}
+
+// 10. Render template and output
+$tpl = $c->View->rendering($page);
+exit($tpl ?? 0);
+```
+
+<Note>
+The bootstrap process follows a clear lifecycle: **Initialize → Configure → Route → Execute → Render → Output**
+</Note>
+
+## Directory Structure
+
+```
+app/
+├── bootstrap.php          # Application entry point
+├── config/                # Configuration files
+│   ├── main.dist.php     # Main configuration template
+│   ├── install.php       # Installation configuration
+│   └── db/               # Database-specific configs
+├── Controllers/           # Controller classes
+│   ├── Primary.php       # Primary controller
+│   ├── Routing.php       # Route definitions
+│   ├── Install.php       # Installation controller
+│   └── Update.php        # Update controller
+├── Core/                  # Core framework components
+│   ├── Container.php     # Dependency injection
+│   ├── Router.php        # URL routing
+│   ├── View.php          # Template engine
+│   ├── DB.php            # Database layer
+│   ├── EventDispatcher.php
+│   └── ...
+├── Models/                # Data models
+│   ├── Model.php         # Base model class
+│   ├── DataModel.php     # Model with change tracking
+│   ├── Page.php          # Base page model
+│   ├── User/             # User models
+│   ├── Forum/            # Forum models
+│   ├── Topic/            # Topic models
+│   └── Post/             # Post models
+├── templates/             # View templates
+│   ├── _default/         # Default theme
+│   └── _user/            # User-customizable theme
+├── lang/                  # Language files
+├── cache/                 # Cache directory
+└── log/                   # Log files
+
+public/                    # Web root
+├── index.php             # Web entry point
+├── style/                # CSS and assets
+└── img/                  # Images
+```
+
+## Request Lifecycle
+
+<Steps>
+  <Step title="Request Entry">
+    Browser request hits `public/index.php` → includes `app/bootstrap.php`
+  </Step>
+  
+  <Step title="Container Initialization">
+    Load configuration → Create service container → Register services
+  </Step>
+  
+  <Step title="Routing">
+    Router matches URL to controller action → Extract parameters
+  </Step>
+  
+  <Step title="Controller Execution">
+    Controller receives request → Interacts with models → Returns Page object
+  </Step>
+  
+  <Step title="Page Preparation">
+    Page object sets template, title, breadcrumbs, navigation, etc.
+  </Step>
+  
+  <Step title="View Rendering">
+    View system compiles and renders template with page data
+  </Step>
+  
+  <Step title="Response Output">
+    HTTP headers sent → HTML output to browser
+  </Step>
+</Steps>
+
+## Design Patterns
+
+### Dependency Injection
+
+All services are registered in the container and lazily instantiated:
+
+```php
+// Services automatically receive the container
+class MyService {
+    public function __construct(protected Container $c) {}
+    
+    public function doSomething() {
+        $db = $this->c->DB;      // Lazy loading
+        $user = $this->c->user;  // Current user
+    }
+}
+```
+
+### Active Record Pattern
+
+Models represent both data and behavior:
+
+```php
+$user = $c->users->load(123);
+$user->username = 'NewName';
+$user->email = 'new@example.com';
+$c->users->update($user);
+```
+
+### Event-Driven Architecture
+
+Extensions can hook into application lifecycle:
+
+```php
+$event = new Event('topic:create:after');
+$event->topic = $topic;
+$c->dispatcher->dispatch($event);
+```
+
+## Performance Considerations
+
+<AccordionGroup>
+  <Accordion title="Lazy Loading">
+    Services are only instantiated when first accessed, reducing memory usage and startup time.
+  </Accordion>
+  
+  <Accordion title="Template Caching">
+    View templates are compiled to PHP and cached. Cache is automatically invalidated when templates change.
+  </Accordion>
+  
+  <Accordion title="Database Query Optimization">
+    Uses PDO with prepared statements. Queries are optimized with proper indexing.
+  </Accordion>
+  
+  <Accordion title="Opcode Caching">
+    Full support for PHP opcode caching (OPcache). Automatically invalidates when code changes.
+  </Accordion>
+</AccordionGroup>
+
+## Configuration Architecture
+
+Configuration is hierarchical and supports:
+
+- **Environment-specific settings** (development, production)
+- **Service definitions** (shared and multiple instances)
+- **Parameter substitution** using `%param%` syntax
+- **Factory methods** using `@service:method` syntax
+
+<CodeGroup>
+
+```php Service Registration
+'shared' => [
+    'DB' => [
+        'class'    => \ForkBB\Core\DB::class,
+        'dsn'      => '%DB_DSN%',
+        'username' => '%DB_USERNAME%',
+        'password' => '%DB_PASSWORD%',
+        'options'  => '%DB_OPTIONS%',
+        'prefix'   => '%DB_PREFIX%',
+    ],
+]
+```
+
+```php Factory Methods
+'shared' => [
+    'user' => '@users:current',  // Calls $c->users->current()
+    'config' => '@ConfigModel:init',
+]
+```
+
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Routing System" icon="route" href="/routing">
+    Learn how URLs are mapped to controllers
+  </Card>
+  <Card title="Models" icon="database" href="/models">
+    Understand the data layer
+  </Card>
+  <Card title="Controllers" icon="gears" href="/controllers">
+    Create request handlers
+  </Card>
+  <Card title="Views" icon="eye" href="/views">
+    Work with templates
+  </Card>
+</CardGroup>

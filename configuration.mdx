@@ -1,0 +1,514 @@
+---
+title: Configuration
+description: Configure database, security, cookies, and other core ForkBB settings
+---
+
+# Configuration
+
+ForkBB's main configuration file is located at `app/config/main.php`. This file is generated during installation from the `main.dist.php` template and contains all core settings for your forum.
+
+<Warning>
+Always backup your configuration file before making changes. Invalid configuration can prevent your forum from running.
+</Warning>
+
+## Configuration file structure
+
+The configuration file returns a PHP array with three main sections:
+
+- **Top-level settings** - Database, cookies, security, and feature settings
+- **`shared`** - Dependency injection container definitions
+- **`multiple`** - Controller and model definitions
+
+## Base URL configuration
+
+The base URL is the foundation for all links in your forum.
+
+```php app/config/main.php
+return [
+    'BASE_URL' => 'https://forum.example.com',
+    // ...
+];
+```
+
+<Note>
+Ensure the base URL matches your actual domain. Do not include a trailing slash.
+</Note>
+
+## Database configuration
+
+ForkBB supports MySQL, PostgreSQL, and SQLite databases using PDO.
+
+### MySQL configuration
+
+```php app/config/main.php
+return [
+    'DB_DSN'      => 'mysql:host=localhost;dbname=forkbb;charset=utf8mb4',
+    'DB_USERNAME' => 'your_db_user',
+    'DB_PASSWORD' => 'your_secure_password',
+    'DB_OPTIONS'  => [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ],
+    'DB_PREFIX'   => 'fbb_',
+];
+```
+
+### PostgreSQL configuration
+
+```php app/config/main.php
+return [
+    'DB_DSN'      => 'pgsql:host=localhost;dbname=forkbb',
+    'DB_USERNAME' => 'your_db_user',
+    'DB_PASSWORD' => 'your_secure_password',
+    'DB_OPTIONS'  => [],
+    'DB_PREFIX'   => 'fbb_',
+];
+```
+
+### SQLite configuration
+
+```php app/config/main.php
+return [
+    'DB_DSN'      => 'sqlite:/path/to/database.db',
+    'DB_USERNAME' => '',
+    'DB_PASSWORD' => '',
+    'DB_OPTIONS'  => [],
+    'DB_PREFIX'   => '',
+];
+```
+
+### Database options
+
+<Info>
+ForkBB requires the `mysqlnd` driver for MySQL connections. Ensure your PHP installation includes this driver.
+</Info>
+
+## Cookie configuration
+
+Cookies are used for user sessions and authentication. Proper cookie configuration is essential for security.
+
+```php app/config/main.php
+'COOKIE' => [
+    'prefix'   => 'forkbb_',           // Cookie name prefix
+    'domain'   => '',                  // Cookie domain (empty for current domain)
+    'path'     => '/',                 // Cookie path
+    'secure'   => true,                // Require HTTPS (set to false for HTTP)
+    'samesite' => 'Lax',              // Lax, Strict, or None
+    'time'     => 1209600,            // Cookie lifetime in seconds (14 days)
+    'key1'     => 'your_random_key_1', // First encryption key
+    'key2'     => 'your_random_key_2', // Second encryption key
+],
+```
+
+### Cookie security settings
+
+<Tabs>
+  <Tab title="Lax (Recommended)">
+    **SameSite=Lax** provides good security while allowing normal cross-site navigation:
+    
+    ```php
+    'samesite' => 'Lax',
+    ```
+    
+    - Cookies sent with top-level navigations (clicking links)
+    - Cookies blocked on cross-site POST requests
+    - Good balance between security and usability
+  </Tab>
+  
+  <Tab title="Strict">
+    **SameSite=Strict** provides maximum security:
+    
+    ```php
+    'samesite' => 'Strict',
+    ```
+    
+    - Cookies only sent for same-site requests
+    - Users may need to re-authenticate after clicking external links
+    - Best for sensitive applications
+  </Tab>
+  
+  <Tab title="None">
+    **SameSite=None** allows cross-site requests:
+    
+    ```php
+    'samesite' => 'None',
+    'secure'   => true, // Required when using SameSite=None
+    ```
+    
+    - Requires HTTPS
+    - Only use if your forum needs to work in iframes
+    - Less secure option
+  </Tab>
+</Tabs>
+
+### Generating secure cookie keys
+
+Generate random, unique keys for your installation:
+
+```bash
+# Generate two random keys
+php -r "echo bin2hex(random_bytes(32)) . PHP_EOL;"
+php -r "echo bin2hex(random_bytes(32)) . PHP_EOL;"
+```
+
+<Warning>
+Never reuse cookie keys from the distribution file or other installations. Generate unique keys for each forum.
+</Warning>
+
+## HMAC security configuration
+
+HMAC is used for generating secure tokens and hashes throughout ForkBB.
+
+```php app/config/main.php
+'HMAC' => [
+    'algo' => 'sha1',              // Hash algorithm (sha1, sha256, etc.)
+    'salt' => 'your_random_salt',  // Unique salt for this installation
+],
+```
+
+<Steps>
+  <Step title="Choose hash algorithm">
+    Use `sha256` for better security (requires more processing power):
+    
+    ```php
+    'algo' => 'sha256',
+    ```
+  </Step>
+  
+  <Step title="Generate unique salt">
+    Create a random salt value:
+    
+    ```bash
+    php -r "echo bin2hex(random_bytes(32)) . PHP_EOL;"
+    ```
+  </Step>
+</Steps>
+
+## Security headers
+
+ForkBB includes comprehensive security headers to protect against common web vulnerabilities.
+
+```php app/config/main.php
+'HTTP_HEADERS' => [
+    'common' => [
+        'X-Content-Type-Options'  => 'nosniff',
+        'X-Frame-Options'         => 'DENY',
+        'Referrer-Policy'         => 'strict-origin-when-cross-origin',
+        'Content-Security-Policy' => "default-src 'self';img-src *;object-src 'none';frame-ancestors 'none';base-uri 'none';form-action 'self'",
+    ],
+    'secure' => [
+        'X-Content-Type-Options'  => 'nosniff',
+        'X-Frame-Options'         => 'DENY',
+        'Referrer-Policy'         => 'strict-origin-when-cross-origin',
+        'Content-Security-Policy' => "default-src 'self';object-src 'none';frame-ancestors 'none';base-uri 'none';form-action 'self'",
+    ],
+],
+```
+
+### Understanding security headers
+
+<AccordionGroup>
+  <Accordion title="Content-Security-Policy (CSP)">
+    CSP prevents XSS attacks by controlling which resources can load:
+    
+    - `default-src 'self'` - Only load resources from your domain
+    - `img-src *` - Allow images from any domain (for user avatars, external images)
+    - `object-src 'none'` - Block plugins like Flash
+    - `frame-ancestors 'none'` - Prevent embedding in iframes
+    - `base-uri 'none'` - Prevent base tag hijacking
+    - `form-action 'self'` - Forms can only submit to your domain
+    
+    <Note>
+    If you need to embed external content, adjust the CSP policy accordingly:
+    
+    ```php
+    'Content-Security-Policy' => "default-src 'self';img-src * data:;script-src 'self' 'unsafe-inline';frame-src https://youtube.com",
+    ```
+    </Note>
+  </Accordion>
+  
+  <Accordion title="X-Frame-Options">
+    Prevents clickjacking by controlling if your site can be embedded in iframes:
+    
+    - `DENY` - Never allow embedding (recommended)
+    - `SAMEORIGIN` - Only allow embedding on your own domain
+  </Accordion>
+  
+  <Accordion title="X-Content-Type-Options">
+    Prevents MIME type sniffing:
+    
+    - `nosniff` - Force browser to respect declared content types
+  </Accordion>
+  
+  <Accordion title="Referrer-Policy">
+    Controls how much referrer information is sent:
+    
+    - `strict-origin-when-cross-origin` - Send full URL for same-origin, only origin for cross-origin (HTTPS → HTTP sends nothing)
+  </Accordion>
+</AccordionGroup>
+
+## Content limits
+
+Configure maximum sizes for various content types:
+
+```php app/config/main.php
+return [
+    'MAX_POST_SIZE'    => 65536,  // Maximum post size in bytes (64KB)
+    'MAX_SUBJ_LENGTH'  => 70,     // Maximum subject length (max 255)
+    'MAX_IMG_SIZE'     => '2M',   // Maximum image upload size
+    'MAX_FILE_SIZE'    => '2M',   // Maximum file upload size
+    'MAX_EMAIL_LENGTH' => 80,     // Maximum email address length
+    'FLOOD_INTERVAL'   => 3600,   // Anti-flood interval in seconds (1 hour)
+];
+```
+
+<Note>
+Size values can be specified as integers (bytes) or strings with suffixes: `'2M'` (megabytes), `'512K'` (kilobytes).
+</Note>
+
+## Username validation
+
+Control username requirements and patterns:
+
+```php app/config/main.php
+'USERNAME' => [
+    'phpPattern' => '%^\p{L}[\p{L}\p{N}\x20\._-]+$%uD',  // PHP regex pattern
+    'jsPattern'  => '^.{2,}$',                             // JavaScript pattern
+    'min'        => 2,                                     // Minimum length
+    'max'        => 25,                                    // Maximum length
+],
+```
+
+### Default username rules
+
+- Must start with a Unicode letter (`\p{L}`)
+- Can contain letters, numbers, spaces, periods, underscores, and hyphens
+- Minimum 2 characters, maximum 25 characters
+
+### Custom username patterns
+
+<CodeGroup>
+
+```php "Alphanumeric only"
+'USERNAME' => [
+    'phpPattern' => '%^[a-zA-Z0-9]+$%',
+    'jsPattern'  => '^[a-zA-Z0-9]{3,20}$',
+    'min'        => 3,
+    'max'        => 20,
+],
+```
+
+```php "Allow Unicode with strict requirements"
+'USERNAME' => [
+    'phpPattern' => '%^\p{L}[\p{L}\p{N}_]{2,}$%uD',
+    'jsPattern'  => '^.{3,30}$',
+    'min'        => 3,
+    'max'        => 30,
+],
+```
+
+</CodeGroup>
+
+## Friendly URL configuration
+
+Configure SEO-friendly URL generation:
+
+```php app/config/main.php
+'FRIENDLY_URL' => [
+    'lowercase' => true,                          // Convert to lowercase
+    'translit'  => true,                          // Transliterate non-ASCII characters
+    'WtoHyphen' => true,                          // Convert whitespace to hyphens
+    'file'      => 'translit.default.php',       // Transliteration rules file
+],
+```
+
+### URL transformation examples
+
+| Original | With Settings | Result |
+|----------|--------------|--------|
+| "Hello World" | All enabled | `hello-world` |
+| "Привет мир" | `translit: true` | `privet-mir` |
+| "TEST Post" | `lowercase: true` | `test-post` |
+| "My New Topic" | `WtoHyphen: true` | `my-new-topic` |
+
+## Debug mode
+
+Enable debugging for development:
+
+```php app/config/main.php
+'DEBUG' => 0,  // 0: disabled, 1: time/memory + queries, 2: log 400+ errors
+```
+
+<Warning>
+**Never enable debug mode in production!** It can expose sensitive information and impact performance.
+</Warning>
+
+### Debug levels
+
+<Steps>
+  <Step title="Level 0 (Production)">
+    Debug mode disabled. No debug output.
+    
+    ```php
+    'DEBUG' => 0,
+    ```
+  </Step>
+  
+  <Step title="Level 1 (Development)">
+    Shows execution time, memory usage, and database queries:
+    
+    ```php
+    'DEBUG' => 1,
+    ```
+  </Step>
+  
+  <Step title="Level 2 (Extended)">
+    Level 1 features plus logging of HTTP 400+ status codes:
+    
+    ```php
+    'DEBUG' => 2,
+    ```
+  </Step>
+</Steps>
+
+## Maintenance mode
+
+Temporarily disable access for maintenance:
+
+```php app/config/main.php
+'MAINTENANCE_OFF' => false,  // Set to true to disable maintenance mode
+```
+
+When enabled, only administrators can access the forum.
+
+## Mail configuration
+
+Configure email sending for notifications and registration:
+
+```php app/config/main.php
+return [
+    'EOL' => PHP_EOL,  // Line breaks in mail headers: PHP_EOL, "\r\n", "\n", or "\r"
+];
+```
+
+SMTP settings are configured through the admin panel, but referenced in the container configuration:
+
+```php app/config/main.php
+'shared' => [
+    'Mail' => [
+        'class' => \ForkBB\Core\Mail::class,
+        'host'  => '%config.o_smtp_host%',   // From database config
+        'user'  => '%config.o_smtp_user%',   // From database config
+        'pass'  => '%config.o_smtp_pass%',   // From database config
+        'ssl'   => '%config.b_smtp_ssl%',    // From database config
+        'eol'   => '%EOL%',
+    ],
+],
+```
+
+## Directory paths
+
+ForkBB uses symbolic references for directory paths:
+
+```php app/config/main.php
+'shared' => [
+    '%DIR_ROOT%'   => realpath(__DIR__ . '/../..'),
+    '%DIR_PUBLIC%' => '%DIR_ROOT%/public',
+    '%DIR_APP%'    => '%DIR_ROOT%/app',
+    '%DIR_CACHE%'  => '%DIR_APP%/cache',
+    '%DIR_CONFIG%' => '%DIR_APP%/config',
+    '%DIR_LANG%'   => '%DIR_APP%/lang',
+    '%DIR_LOG%'    => '%DIR_APP%/log',
+    '%DIR_VIEWS%'  => '%DIR_APP%/templates',
+    '%DIR_EXT%'    => '%DIR_ROOT%/ext',
+],
+```
+
+<Note>
+You typically don't need to modify directory paths unless you have a custom installation structure.
+</Note>
+
+## BBCode configuration
+
+Configure BBCode parser settings:
+
+```php app/config/main.php
+'BBCODE_INFO' => [
+    'smTpl'    => '<img src="{url}" alt="{alt}">',  // Smiley template
+    'smTplTag' => 'img',                               // Template tag
+    'smTplBl'  => ['url'],                            // Required attributes
+],
+```
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Security" icon="shield">
+    - Generate unique keys and salts for each installation
+    - Enable secure cookies (HTTPS)
+    - Keep debug mode disabled in production
+    - Regularly update security headers based on your needs
+  </Card>
+  
+  <Card title="Performance" icon="gauge">
+    - Set appropriate content limits
+    - Configure flood intervals to prevent abuse
+    - Use file-based caching (enabled by default)
+    - Keep database connections optimized
+  </Card>
+  
+  <Card title="Backups" icon="floppy-disk">
+    - Always backup before configuration changes
+    - Store backups outside the web root
+    - Test configuration in development first
+    - Document custom settings
+  </Card>
+  
+  <Card title="Validation" icon="check">
+    - Test after making configuration changes
+    - Check error logs for issues
+    - Verify security headers are working
+    - Test user registration and login flows
+  </Card>
+</CardGroup>
+
+## Configuration validation
+
+After making changes, validate your configuration:
+
+<Steps>
+  <Step title="Check PHP syntax">
+    Ensure your configuration file has valid PHP syntax:
+    
+    ```bash
+    php -l app/config/main.php
+    ```
+  </Step>
+  
+  <Step title="Test database connection">
+    Verify database credentials are correct by accessing your forum
+  </Step>
+  
+  <Step title="Verify security headers">
+    Use browser developer tools to check that security headers are being sent:
+    
+    ```bash
+    curl -I https://your-forum.com
+    ```
+  </Step>
+  
+  <Step title="Test user flows">
+    - User registration
+    - Login and logout
+    - Password reset
+    - Posting content
+  </Step>
+</Steps>
+
+## Next steps
+
+With your forum configured, learn about:
+
+- [Architecture](/architecture) - Understand ForkBB's structure
+- [User management](/features/user-management) - Managing users and groups
+- [Extensions](/extensions/overview) - Extending ForkBB functionality

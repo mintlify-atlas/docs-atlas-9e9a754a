@@ -1,0 +1,682 @@
+---
+title: BBCode Formatting
+description: BBCode parser, custom tags, formatting options, and content rendering in ForkBB
+icon: code
+---
+
+## Overview
+
+ForkBB includes a powerful BBCode parser for formatting posts and signatures. The system supports standard BBCode tags, custom tags, and extensible handlers for advanced formatting.
+
+## Parser Architecture
+
+The BBCode parser is implemented in `app/Core/Parser.php:16` and extends the Parserus library:
+
+```php app/Core/Parser.php
+class Parser extends Parserus
+{
+    public function __construct(int $flag, protected Container $c)
+    {
+        parent::__construct($flag);
+        $this->init();
+    }
+    
+    protected function init(): void
+    {
+        if (
+            1 === $this->c->config->b_message_bbcode
+            || 1 === $this->c->config->b_sig_bbcode
+        ) {
+            $this->setBBCodes($this->c->bbcode->list);
+        }
+        
+        if (
+            1 === $this->c->user->show_smilies
+            && (
+                1 === $this->c->config->b_smilies_sig
+                || 1 === $this->c->config->b_smilies
+            )
+        ) {
+            $smilies = [];
+            
+            foreach ($this->c->smilies->list as $cur) {
+                $smilies[$cur['sm_code']] = $this->c->PUBLIC_URL . '/img/sm/' . $cur['sm_image'];
+            }
+            
+            $info = $this->c->BBCODE_INFO;
+            
+            $this->setSmilies($smilies)->setSmTpl($info['smTpl'], $info['smTplTag'], $info['smTplBl']);
+        }
+        
+        $this->setAttr('baseUrl', $this->c->BASE_URL);
+        $this->setAttr('showImg', 1 === $this->c->user->show_img);
+        $this->setAttr('showImgSign', 1 === $this->c->user->show_img_sig);
+        $this->setAttr(
+            'hashtagLink',
+            1 === $this->c->user->g_search ? $this->c->Router->link('Search', ['keywords' => 'HASHTAG']) : null
+        );
+        $this->setAttr('user', $this->c->user);
+    }
+}
+```
+
+<Info>
+  The parser configuration is initialized per-request based on user preferences and forum settings.
+</Info>
+
+## BBCode Management
+
+BBCodes are managed through the BBCodeList model:
+
+```php app/Models/BBCodeList/BBCodeList.php
+class BBCodeList extends Model
+{
+    protected string $cKey = 'BBCodeList';
+    
+    public function __construct(string $file, Container $container)
+    {
+        parent::__construct($container);
+        
+        $this->fileDefault = "{$container->DIR_CONFIG}/{$file}";
+        $this->fileCache   = "{$container->DIR_CACHE}/generated_bbcode.php";
+    }
+    
+    public function init(): BBCodeList
+    {
+        if (! \is_file($this->fileCache)) {
+            $this->generate();
+        }
+        
+        $oldBadFile = $this->c->ErrorHandler->addBadFile($this->fileCache);
+        
+        $this->list = include $this->fileCache;
+        
+        $this->c->ErrorHandler->addBadFile($oldBadFile);
+        
+        return $this;
+    }
+    
+    public function reset(): BBCodeList
+    {
+        if (\is_file($this->fileCache)) {
+            if (\unlink($this->fileCache)) {
+                return $this->invalidate();
+            } else {
+                throw new RuntimeException('The generated bbcode file cannot be deleted');
+            }
+        } else {
+            return $this;
+        }
+    }
+    
+    public function invalidate(): BBCodeList
+    {
+        if (\function_exists('\\opcache_invalidate')) {
+            \opcache_invalidate($this->fileCache, true);
+        }
+        
+        return $this;
+    }
+}
+```
+
+<Note>
+  BBCode configurations are compiled and cached for performance. Clear the cache after modifying BBCode definitions.
+</Note>
+
+## Standard BBCode Tags
+
+Default BBCode tags are defined in `app/config/defaultBBCode.php`:
+
+### Text Formatting
+
+<Tabs>
+  <Tab title="Basic">
+    ```php app/config/defaultBBCode.php
+    [
+        'tag' => 'b',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<b>{$body}</b>";
+    HANDLER,
+    ],
+    [
+        'tag' => 'i',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<i>{$body}</i>";
+    HANDLER,
+    ],
+    [
+        'tag' => 'u',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<u>{$body}</u>";
+    HANDLER,
+    ],
+    [
+        'tag' => 's',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<s>{$body}</s>";
+    HANDLER,
+    ]
+    ```
+    
+    Usage:
+    - `[b]bold text[/b]` → **bold text**
+    - `[i]italic text[/i]` → *italic text*
+    - `[u]underline[/u]` → <u>underline</u>
+    - `[s]strikethrough[/s]` → ~~strikethrough~~
+  </Tab>
+  
+  <Tab title="Semantic">
+    ```php app/config/defaultBBCode.php
+    [
+        'tag' => 'em',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<em>{$body}</em>";
+    HANDLER,
+    ],
+    [
+        'tag' => 'del',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<del>{$body}</del>";
+    HANDLER,
+    ],
+    [
+        'tag' => 'ins',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<ins>{$body}</ins>";
+    HANDLER,
+    ]
+    ```
+    
+    Semantic HTML alternatives for better accessibility
+  </Tab>
+  
+  <Tab title="Scientific">
+    ```php app/config/defaultBBCode.php
+    [
+        'tag' => 'sub',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<sub>{$body}</sub>";
+    HANDLER,
+    ],
+    [
+        'tag' => 'sup',
+        'parents' => ['inline', 'block', 'url', 'h'],
+        'handler' => <<<'HANDLER'
+    return "<sup>{$body}</sup>";
+    HANDLER,
+    ]
+    ```
+    
+    - `H[sub]2[/sub]O` → H₂O
+    - `x[sup]2[/sup]` → x²
+  </Tab>
+</Tabs>
+
+### Headers
+
+Headers create sections with automatic anchors:
+
+```php app/config/defaultBBCode.php
+[
+    'tag' => 'h1',
+    'type' => 'h',
+    'handler' => <<<'HANDLER'
+$text  = $parser->getText($id);
+$ident = $parser->createIdentifier($text);
+$ident = $parser->e($ident);
+
+return "</p><div id=\"{$ident}\" class=\"f-bb-h1\"><p>{$body}</p></div><p>";
+HANDLER,
+],
+[
+    'tag' => 'h2',
+    'type' => 'h',
+    'handler' => <<<'HANDLER'
+$text  = $parser->getText($id);
+$ident = $parser->createIdentifier($text);
+$ident = $parser->e($ident);
+
+return "</p><div id=\"{$ident}\" class=\"f-bb-h2\"><p>{$body}</p></div><p>";
+HANDLER,
+]
+// h3, h4, h5, h6 follow same pattern
+```
+
+**Usage:**
+```
+[h1]Main Title[/h1]
+[h2]Section Title[/h2]
+[h3]Subsection[/h3]
+```
+
+<Info>
+  Headers automatically generate IDs for linking and table of contents generation.
+</Info>
+
+### Colors
+
+```php app/config/defaultBBCode.php
+[
+    'tag' => 'color',
+    'parents' => ['inline', 'block', 'url', 'h'],
+    'self_nesting' => 5,
+    'attrs' => [
+        'Def' => [
+            'format' => '%^(?:\#(?:[\dA-Fa-f]{3}){1,2}|(?:aqua|black|blue|fuchsia|gray|green|lime|maroon|navy|olive|orange|purple|red|silver|teal|yellow|white))$%',
+        ],
+    ],
+    'handler' => <<<'HANDLER'
+$parser->inlineStyle(true);
+
+$color = $attrs['Def'];
+
+if ('#' === $color[0]) {
+    $color = \strtoupper($color);
+} else {
+    $repl = [
+        'black'   => '#000000',
+        'gray'    => '#808080',
+        'silver'  => '#C0C0C0',
+        'white'   => '#FFFFFF',
+        'fuchsia' => '#FF00FF',
+        'purple'  => '#800080',
+        'red'     => '#FF0000',
+        'maroon'  => '#800000',
+        'yellow'  => '#FFFF00',
+        'olive'   => '#808000',
+        'lime'    => '#00FF00',
+        'green'   => '#008000',
+        'aqua'    => '#00FFFF',
+        'teal'    => '#008080',
+        'blue'    => '#0000FF',
+        'navy'    => '#000080',
+    ];
+    
+    if (isset($repl[$color])) {
+        $color = $repl[$color];
+    }
+}
+
+return "<span class=\"f-bb-color\" style=\"color:{$color};\">{$body}</span>";
+HANDLER,
+]
+```
+
+**Usage:**
+- `[color=red]Red text[/color]`
+- `[color=#FF0000]Red text[/color]`
+- `[color=#F00]Red text[/color]`
+- `[background=yellow]Highlighted[/background]`
+
+### Code Blocks
+
+```php app/config/defaultBBCode.php
+[
+    'tag' => 'code',
+    'type' => 'block',
+    'recursive' => true,
+    'text_only' => true,
+    'pre' => true,
+    'attrs' => [
+        'Def' => true,
+        'No_attr' => true,
+    ],
+    'handler' => <<<'HANDLER'
+return '</p><pre class="f-bb-code f-bbivert">' . \trim($body, "\n\r") . '</pre><p>';
+HANDLER,
+]
+```
+
+**Usage:**
+```
+[code]
+function hello() {
+    echo "Hello, World!";
+}
+[/code]
+```
+
+## Content Parsing
+
+### Preparing Content
+
+```php app/Core/Parser.php
+public function prepare(string $text, bool $isSignature = false): string
+{
+    if ($isSignature) {
+        $whiteList = 1 === $this->c->config->b_sig_bbcode
+            ? (empty($this->c->config->a_bb_white_sig) && empty($this->c->config->a_bb_black_sig)
+                ? null
+                : $this->c->config->a_bb_white_sig
+            )
+            : [];
+    } else {
+        $whiteList = 1 === $this->c->config->b_message_bbcode
+            ? (empty($this->c->config->a_bb_white_mes) && empty($this->c->config->a_bb_black_mes)
+                ? null
+                : $this->c->config->a_bb_white_mes
+            )
+            : [];
+    }
+    
+    $blackList = 1 === $this->c->user->g_post_links ? null : ['email', 'url', 'img'];
+    
+    $this->setAttr('isSign', $isSignature)
+        ->setWhiteList($whiteList)
+        ->setBlackList($blackList)
+        ->parse($text, ['strict' => true])
+        ->stripEmptyTags(" \n\t\r\v", true);
+    
+    if (1 === $this->c->config->b_make_links) {
+        $this->detectUrls();
+    }
+    
+    // Create hashtags
+    $this->detect('hashtag', '%(?<=^|\s|\n|\r)#(?=[\p{L}\p{N}_]{3})[\p{L}\p{N}]+(?:_+[\p{L}\p{N}]+)*(?=$|\s|\n|\r|\.|,)%u', true);
+    
+    return \preg_replace('%^(\x20*\n)+|(\n\x20*)+$%D', '', $this->getCode());
+}
+```
+
+### Parsing Messages
+
+```php app/Core/Parser.php
+public function parseMessage(?string $text = null, bool $hideSmilies = false): string
+{
+    // If null, use data from prepare()
+    if (null !== $text) {
+        $whiteList = 1 === $this->c->config->b_message_bbcode ? null : [];
+        $blackList = $this->c->config->a_bb_black_mes;
+        
+        $this->setAttr('isSign', false)
+            ->setWhiteList($whiteList)
+            ->setBlackList($blackList)
+            ->parse($text);
+    }
+    
+    if (
+        ! $hideSmilies
+        && 1 === $this->c->config->b_smilies
+    ) {
+        $this->detectSmilies();
+    }
+    
+    return $this->getHtml();
+}
+```
+
+### Parsing Signatures
+
+```php app/Core/Parser.php
+public function parseSignature(?string $text = null): string
+{
+    // If null, use data from prepare()
+    if (null !== $text) {
+        $whiteList = 1 === $this->c->config->b_sig_bbcode ? null : [];
+        $blackList = $this->c->config->a_bb_black_sig;
+        
+        $this->setAttr('isSign', true)
+            ->setWhiteList($whiteList)
+            ->setBlackList($blackList)
+            ->parse($text);
+    }
+    
+    if (1 === $this->c->config->b_smilies_sig) {
+        $this->detectSmilies();
+    }
+    
+    return $this->getHtml();
+}
+```
+
+<Note>
+  Messages and signatures can have different allowed BBCode tags and different smilie settings.
+</Note>
+
+## Whitelists and Blacklists
+
+### Tag Filtering
+
+- **Whitelist**: Only listed tags are allowed (null = all tags)
+- **Blacklist**: Listed tags are forbidden (null = no restrictions)
+
+```php
+// Allow only basic formatting
+$whiteList = ['b', 'i', 'u', 'color'];
+
+// Block links and images
+$blackList = ['url', 'email', 'img'];
+
+$parser->setWhiteList($whiteList)
+       ->setBlackList($blackList)
+       ->parse($text);
+```
+
+<Warning>
+  Users without link posting permission have `url`, `email`, and `img` tags automatically blacklisted.
+</Warning>
+
+## URL Detection
+
+Automatic URL linking:
+
+```php app/Core/Parser.php
+if (1 === $this->c->config->b_make_links) {
+    $this->detectUrls();
+}
+```
+
+Plain URLs in text are automatically converted to clickable links when enabled.
+
+## Hashtag Support
+
+Hashtags are automatically detected and linked:
+
+```php app/Core/Parser.php
+$this->detect('hashtag', '%(?<=^|\s|\n|\r)#(?=[\p{L}\p{N}_]{3})[\p{L}\p{N}]+(?:_+[\p{L}\p{N}]+)*(?=$|\s|\n|\r|\.|,)%u', true);
+```
+
+Hashtags must:
+- Start with `#`
+- Have at least 3 alphanumeric characters
+- Be preceded by whitespace
+- Be followed by whitespace or punctuation
+
+Example: `#programming`, `#web_development`, `#ForkBB`
+
+## Inline Styles
+
+Some BBCodes require inline styles:
+
+```php app/Core/Parser.php
+protected bool $flagInlneStyle = false;
+
+public function inlineStyle(?bool $flag = null): bool
+{
+    $prev = $this->flagInlneStyle;
+    
+    if (true === $flag) {
+        $this->flagInlneStyle = $flag;
+    }
+    
+    return $prev;
+}
+```
+
+Handlers call `$parser->inlineStyle(true)` when they use inline CSS.
+
+## Quoting
+
+Prepare content for quoting by removing certain tags:
+
+```php app/Core/Parser.php
+public function prepareToQuote(string $text, array $remove = []): string
+{
+    $whiteList = 1 === $this->c->config->b_message_bbcode ? null : [];
+    $blackList = $this->c->config->a_bb_black_mes;
+    
+    $this->setAttr('isSign', false)
+        ->setWhiteList($whiteList)
+        ->setBlackList($blackList)
+        ->parse($text);
+    
+    if ($remove) {
+        $arr = $this->getIds(...(\array_keys($remove)));
+        
+        if ($arr) {
+            foreach ($arr as $id => $name) {
+                $this->data[$id]['text'] = $remove[$name];
+                $this->data[$id]['tag'] = null;
+            }
+        }
+    }
+    
+    return \preg_replace('%^(\x20*\n)+|(\n\x20*)+$%D', '', $this->getCode());
+}
+```
+
+**Usage:**
+```php
+// Remove quote tags when quoting
+$quoted = $parser->prepareToQuote($text, ['quote' => '']);
+```
+
+## Custom BBCode Tags
+
+Create custom tags by extending the BBCode configuration:
+
+```php
+[
+    'tag' => 'custom',
+    'type' => 'block',
+    'parents' => ['block'],
+    'attrs' => [
+        'Def' => [
+            'format' => '%^[a-z]+$%i',
+        ],
+    ],
+    'handler' => <<<'HANDLER'
+$attr = $attrs['Def'] ?? 'default';
+return "<div class='custom-{$attr}'>{$body}</div>";
+HANDLER,
+]
+```
+
+### Tag Configuration
+
+<Accordion title="Tag Properties">
+  - **tag**: Tag name (lowercase)
+  - **type**: Tag type (block, inline, h, url, etc.)
+  - **parents**: Allowed parent tags
+  - **recursive**: Allow nested tags of same type
+  - **text_only**: Tag contains only text (no other tags)
+  - **pre**: Preserve whitespace
+  - **single**: Self-closing tag
+  - **attrs**: Attribute definitions
+  - **handler**: PHP code to render HTML
+</Accordion>
+
+## Smilies
+
+Emoticons are configured separately:
+
+```php app/Core/Parser.php
+$smilies = [];
+
+foreach ($this->c->smilies->list as $cur) {
+    $smilies[$cur['sm_code']] = $this->c->PUBLIC_URL . '/img/sm/' . $cur['sm_image'];
+}
+
+$info = $this->c->BBCODE_INFO;
+
+$this->setSmilies($smilies)->setSmTpl($info['smTpl'], $info['smTplTag'], $info['smTplBl']);
+```
+
+Smilies can be:
+- Enabled/disabled globally
+- Enabled/disabled in signatures
+- Controlled per-user preference
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Caching" icon="bolt">
+    Compiled BBCode configurations are cached
+  </Card>
+  
+  <Card title="Lazy Loading" icon="download">
+    BBCode list loaded only when needed
+  </Card>
+  
+  <Card title="Opcache" icon="microchip">
+    PHP opcache accelerates handler execution
+  </Card>
+  
+  <Card title="Minimal Parsing" icon="gauge">
+    Parse once, render multiple times
+  </Card>
+</CardGroup>
+
+## Security
+
+<Warning>
+  **XSS Prevention**: The parser escapes all user input. Never use `{!! $html !!}` raw output in templates.
+</Warning>
+
+### Safe Output
+
+Always escape dynamic content:
+
+```php
+$parser->e($userInput);  // Escape HTML entities
+```
+
+### URL Validation
+
+URLs are validated before rendering:
+
+```php
+// Only http:// and https:// protocols allowed by default
+// Configure additional protocols in bbcode settings
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Cache Management">
+    Clear BBCode cache after modifying tag definitions. Use `reset()` and `invalidate()` methods.
+  </Accordion>
+  
+  <Accordion title="Tag Nesting">
+    Define proper parent relationships to prevent invalid nesting. Test thoroughly with complex combinations.
+  </Accordion>
+  
+  <Accordion title="Performance">
+    Limit recursive nesting depth with `self_nesting` property. Consider disabling expensive tags for signatures.
+  </Accordion>
+  
+  <Accordion title="User Experience">
+    Provide a preview feature. Show available BBCode tags in editor. Consider WYSIWYG editor integration.
+  </Accordion>
+</AccordionGroup>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="Forums & Topics" icon="comments" href="/features/forums-topics">
+    How BBCode is used in posts and topics
+  </Card>
+  
+  <Card title="Search" icon="search" href="/features/search">
+    How BBCode affects search indexing
+  </Card>
+</CardGroup>

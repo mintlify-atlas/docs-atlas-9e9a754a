@@ -1,0 +1,282 @@
+---
+title: Creating Extensions
+description: Step-by-step guide to building your own ForkBB extension
+---
+
+## Getting Started
+
+Creating a ForkBB extension involves setting up the proper directory structure, defining metadata, and implementing your custom functionality.
+
+<Steps>
+  <Step title="Create Extension Directory">
+    Create a directory structure under `ext/` following the pattern `vendor-name/extension-name`:
+
+    ```bash
+    mkdir -p ext/mycompany/hello-world
+    cd ext/mycompany/hello-world
+    ```
+
+    The vendor name should be unique to you or your organization, and the extension name should describe what it does.
+  </Step>
+
+  <Step title="Create composer.json">
+    Every extension requires a `composer.json` file with specific metadata and configuration:
+
+    ```json
+    {
+      "name": "mycompany/hello-world",
+      "type": "forkbb-extension",
+      "description": "A simple hello world extension",
+      "version": "1.0.0",
+      "license": "MIT",
+      "authors": [
+        {
+          "name": "Your Name",
+          "email": "you@example.com",
+          "role": "Developer"
+        }
+      ],
+      "extra": {
+        "display-name": "Hello World",
+        "requirements": {
+          "forkbb": ">=2.0.0"
+        }
+      }
+    }
+    ```
+
+    <Note>
+      The `type` field must be set to `"forkbb-extension"` for ForkBB to recognize it.
+    </Note>
+  </Step>
+
+  <Step title="Define Extension Actions (Optional)">
+    If your extension needs to perform actions during lifecycle events, create an Actions class that extends `AbstractActions`:
+
+    ```php
+    <?php
+    namespace MyCompany\HelloWorld;
+
+    use ForkBB\Models\Extension\AbstractActions;
+
+    class Actions extends AbstractActions
+    {
+        public function install(): bool
+        {
+            // Run when extension is installed
+            return true;
+        }
+
+        public function uninstall(): bool
+        {
+            // Run when extension is uninstalled
+            return true;
+        }
+
+        public function updown(): bool
+        {
+            // Run when extension is updated or downgraded
+            return true;
+        }
+
+        public function enable(): bool
+        {
+            // Run when extension is enabled
+            return true;
+        }
+
+        public function disable(): bool
+        {
+            // Run when extension is disabled
+            return true;
+        }
+    }
+    ```
+
+    Then reference it in your `composer.json`:
+
+    ```json
+    {
+      "extra": {
+        "display-name": "Hello World",
+        "autoload": [
+          {
+            "prefix": "MyCompany\\HelloWorld\\",
+            "path": "src"
+          }
+        ],
+        "actions": "MyCompany\\HelloWorld\\Actions"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Add Event Listeners">
+    To hook into ForkBB events, define listeners in your `composer.json`:
+
+    ```json
+    {
+      "extra": {
+        "events": [
+          {
+            "name": "Models\\Page:prepare:after",
+            "priority": 100,
+            "listener": "MyCompany\\HelloWorld\\Listeners\\PageListener"
+          }
+        ]
+      }
+    }
+    ```
+
+    Higher priority values run first. See the [Events documentation](/extensions/events) for available events.
+  </Step>
+
+  <Step title="Add Static Assets (Optional)">
+    If your extension needs CSS, JavaScript, or images, create symlinks to serve them from the `public/` directory:
+
+    ```json
+    {
+      "extra": {
+        "symlinks": [
+          {
+            "type": "public",
+            "target": "public",
+            "link": "ext/mycompany-hello-world"
+          }
+        ]
+      }
+    }
+    ```
+
+    When enabled, this creates a symlink at `public/ext/mycompany-hello-world/` pointing to your extension's `public/` directory.
+  </Step>
+
+  <Step title="Modify Templates (Optional)">
+    Extensions can inject content into templates before they're rendered:
+
+    ```json
+    {
+      "extra": {
+        "templates": [
+          {
+            "type": "pre",
+            "template": "layouts/main,layouts/admin",
+            "name": "HEAD",
+            "priority": 100,
+            "file": "templates/head.forkbb"
+          }
+        ]
+      }
+    }
+    ```
+
+    This injects content from `templates/head.forkbb` into the `HEAD` block of specified templates.
+  </Step>
+
+  <Step title="Add Configuration Values (Optional)">
+    Extensions can add configuration values to the forum:
+
+    ```json
+    {
+      "extra": {
+        "config": {
+          "o_hello_world_enabled": 1,
+          "o_hello_world_message": "Hello, World!"
+        }
+      }
+    }
+    ```
+
+    These values are merged into the forum configuration and accessible via `$this->c->config`.
+  </Step>
+
+  <Step title="Install and Enable">
+    Once your extension is ready, install it through the Admin panel or via code:
+
+    ```php
+    $ext = $this->c->Extensions->get('mycompany/hello-world');
+    
+    if ($ext->canInstall) {
+        $this->c->Extensions->install($ext);
+    }
+    
+    if ($ext->canEnable) {
+        $this->c->Extensions->enable($ext);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Extension Validation
+
+When scanning for extensions, ForkBB validates the `composer.json` structure. Required fields include:
+
+- `name` - Must match pattern `vendor/extension-name`
+- `type` - Must be `"forkbb-extension"`
+- `description` - Brief description of the extension
+- `version` - Semantic version number
+- `authors` - Array of author objects with name
+- `extra.display-name` - Human-readable name for admin panel
+
+From the Extensions model validation:
+
+```php
+'name'               => 'required|string|regex:%^[a-z0-9](?:[_.-]?[a-z0-9]+)*/[a-z0-9](?:[_.-]?[a-z0-9]+)*$%',
+'type'               => 'required|string|in:forkbb-extension',
+'description'        => 'required|string',
+'version'            => 'required|string',
+'authors'            => 'required|array',
+'authors.*.name'     => 'required|string',
+'extra'              => 'required|array',
+'extra.display-name' => 'required|string',
+```
+
+## Example Extension Structure
+
+Here's a complete example of a well-structured extension:
+
+```
+ext/mycompany/hello-world/
+├── composer.json
+├── src/
+│   ├── Actions.php
+│   └── Listeners/
+│       └── PageListener.php
+├── templates/
+│   └── head.forkbb
+└── public/
+    ├── css/
+    │   └── hello.css
+    └── js/
+        └── hello.js
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use namespaced vendor names">
+    Choose a unique vendor name to avoid conflicts with other extensions. Use your company name, GitHub username, or domain.
+  </Accordion>
+
+  <Accordion title="Semantic versioning">
+    Follow semantic versioning (MAJOR.MINOR.PATCH) for your extension versions. This helps users understand compatibility.
+  </Accordion>
+
+  <Accordion title="Handle errors gracefully">
+    All Actions methods should return `true` on success or `false` on failure. ForkBB will halt the operation on failure.
+  </Accordion>
+
+  <Accordion title="Clean up on uninstall">
+    Always remove any database tables, files, or configuration in your `uninstall()` method to avoid orphaned data.
+  </Accordion>
+
+  <Accordion title="Test all lifecycle methods">
+    Test installing, enabling, disabling, updating, and uninstalling your extension to ensure it handles all states correctly.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Card title="Event System" icon="bolt" href="/extensions/events">
+  Learn how to use events to hook into ForkBB functionality
+</Card>

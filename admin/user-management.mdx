@@ -1,0 +1,489 @@
+---
+title: User Management
+description: Search, edit, and manage forum users through the admin panel
+icon: users
+---
+
+The user management system provides powerful tools for searching, editing, and administering forum users.
+
+## User Search
+
+The admin panel offers comprehensive user search capabilities with multiple filter options.
+
+### Search Criteria
+
+<AccordionGroup>
+  <Accordion title="Basic Information">
+    - **Username**: Search by username (max 190 characters)
+    - **Email**: Search by email address
+    - **Title**: Custom user title
+    - **Real name**: User's real name field
+  </Accordion>
+  
+  <Accordion title="Profile Information">
+    - **Gender**: Filter by gender (Not displayed, Male, Female)
+    - **Website**: User's website URL
+    - **Social profiles**: 5 social network profile fields
+    - **Location**: User location (max 30 characters)
+    - **Signature**: Search in user signatures
+  </Accordion>
+  
+  <Accordion title="Activity Metrics">
+    - **Post count**: Range-based post count filter
+    - **Last post**: Date range for last post
+    - **Last visit**: Date range for last visit
+    - **Registration date**: Date range for registration
+    - **Drafts**: Number of saved drafts
+  </Accordion>
+  
+  <Accordion title="Administrative">
+    - **Admin note**: Private admin notes about users
+    - **User group**: Filter by group membership
+  </Accordion>
+</AccordionGroup>
+
+### Search Form Implementation
+
+```php Users/View.php:173
+protected function form(array $data): array
+{
+    $form = [
+        'action' => $this->c->Router->link('AdminUsers'),
+        'hidden' => [
+            'token' => $this->c->Csrf->create('AdminUsers'),
+        ],
+        'sets'   => [],
+        'btns'   => [
+            'search' => [
+                'type'  => 'submit',
+                'value' => __('Submit search'),
+            ],
+        ],
+    ];
+    
+    // Add search fields...
+    
+    return $form;
+}
+```
+
+### Sorting Results
+
+Search results can be sorted by:
+
+<CodeGroup>
+```php Order Options
+'order_by' => [
+    'username'   => __('Order by username'),
+    'email'      => __('Order by e-mail'),
+    'num_posts'  => __('Order by posts'),
+    'last_post'  => __('Order by last post'),
+    'last_visit' => __('Order by last visit'),
+    'registered' => __('Order by registered'),
+]
+```
+
+```php Direction
+'direction' => [
+    'ASC'  => __('Ascending'),
+    'DESC' => __('Descending'),
+]
+```
+</CodeGroup>
+
+## IP Address Search
+
+<Warning>
+IP address search requires the `viewIP` permission.
+</Warning>
+
+Administrators with IP viewing permissions can search for users by IP address:
+
+```php Users/View.php:426
+protected function formIP(array $data): array
+{
+    $form = [
+        'action' => $this->c->Router->link('AdminUsers'),
+        'hidden' => [
+            'token' => $this->c->Csrf->create('AdminUsers'),
+        ],
+        'sets'   => [],
+        'btns'   => [
+            'find' => [
+                'type'  => 'submit',
+                'value' => __('Find IP address'),
+            ],
+        ],
+    ];
+    
+    $fields['ip'] = [
+        'type'      => 'text',
+        'maxlength' => '49',
+        'caption'   => 'IP address label',
+        'required'  => true,
+    ];
+    
+    return $form;
+}
+```
+
+The IP search validates both IPv4 and IPv6 addresses:
+
+```php Users/View.php:52
+$ip = \filter_var($v->ip, \FILTER_VALIDATE_IP);
+
+if (false === $ip) {
+    $this->fIswev = [FORK_MESS_VLD, 'Bad IP message'];
+}
+```
+
+## User Actions
+
+The admin panel supports three main actions on selected users:
+
+### Available Actions
+
+<Tabs>
+  <Tab title="Ban Users">
+    ```php Users.php:20
+    const ACTION_BAN = 'ban';
+    ```
+    
+    Ban users from accessing the forum. Checks:
+    - User is not already banned
+    - Current admin has permission to ban the target user
+    - Admins and moderators cannot be banned
+    
+    ```php Users.php:104
+    case self::ACTION_BAN:
+        if ($this->c->bans->banFromName($user->username) > 0) {
+            $this->fIswev = [FORK_MESS_INFO, ['User is ban', $user->username]];
+            return false;
+        }
+        
+        if (! $this->userRules->canBanUser($user)) {
+            $this->fIswev = [FORK_MESS_VLD, ['You are not allowed to ban the %s', $user->username]];
+            
+            if ($user->isAdmMod) {
+                $this->fIswev = [FORK_MESS_INFO, 'No ban admins message'];
+            }
+            
+            return false;
+        }
+        break;
+    ```
+  </Tab>
+  
+  <Tab title="Delete Users">
+    ```php Users.php:21
+    const ACTION_DEL = 'delete';
+    ```
+    
+    Permanently delete user accounts. Restrictions:
+    - Admins and moderators cannot be deleted
+    - Permission checks apply
+    
+    ```php Users.php:122
+    case self::ACTION_DEL:
+        if (! $this->userRules->canDeleteUser($user)) {
+            $this->fIswev = [FORK_MESS_VLD, ['You are not allowed to delete the %s', $user->username]];
+            
+            if ($user->isAdmMod) {
+                $this->fIswev = [FORK_MESS_INFO, 'No delete admins message'];
+            }
+            
+            return false;
+        }
+        break;
+    ```
+  </Tab>
+  
+  <Tab title="Change Group">
+    ```php Users.php:22
+    const ACTION_CHG = 'change_group';
+    ```
+    
+    Move users to different user groups:
+    - Administrators cannot have their group changed
+    - Users cannot change their own group
+    
+    ```php Users.php:134
+    case self::ACTION_CHG:
+        if (! $this->userRules->canChangeGroup($user, $profile)) {
+            $this->fIswev = [FORK_MESS_VLD, ['You are not allowed to change group for %s', $user->username]];
+            
+            if ($user->isAdmin) {
+                $this->fIswev = [FORK_MESS_INFO, 'No move admins message'];
+            }
+            
+            return false;
+        }
+        break;
+    ```
+  </Tab>
+</Tabs>
+
+### Action Validation
+
+All bulk actions are validated before execution:
+
+```php Users.php:82
+protected function checkSelected(array $selected, string $action, bool $profile = false): array|false
+{
+    $selected = \array_map('\\intval', $selected);
+    $bad      = \array_filter($selected, function ($value) {
+        return $value < 1;
+    });
+    
+    if (! empty($bad)) {
+        $this->fIswev = [FORK_MESS_VLD, 'Action not available'];
+        return false;
+    }
+    
+    $userList = $this->c->users->loadByIds($selected);
+    $result   = [];
+    
+    foreach ($userList as $user) {
+        if (! $user instanceof User) {
+            continue;
+        }
+        
+        // Perform action-specific checks...
+    }
+    
+    if (empty($result)) {
+        $this->fIswev = [FORK_MESS_VLD, 'No users selected'];
+        return false;
+    }
+    
+    return $result;
+}
+```
+
+## User Promotion
+
+<Info>
+Users can be promoted to different groups automatically based on post count or manually by administrators.
+</Info>
+
+### Manual Promotion
+
+Administrators can manually promote users:
+
+```php Users/Promote.php:21
+public function promote(array $args, string $method): Page
+{
+    if (! $this->c->Csrf->verify($args['token'], 'AdminUserPromote', $args)) {
+        return $this->c->Message->message($this->c->Csrf->getError());
+    }
+    
+    $user = $this->c->users->load($args['uid']);
+    
+    if (0 < $user->g_promote_next_group * $user->g_promote_min_posts) {
+        $user->group_id = $user->g_promote_next_group;
+        $this->c->users->update($user);
+    }
+    
+    return $this->c->Redirect->page('ViewPost', ['id' => $args['pid']])
+        ->message('User promote redirect', FORK_MESS_SUCC);
+}
+```
+
+### Automatic Promotion
+
+Configure automatic promotion in group settings:
+- Set target group (`g_promote_next_group`)
+- Define minimum post count (`g_promote_min_posts`)
+- System promotes users when criteria are met
+
+## Creating New Users
+
+<Note>
+Only administrators can create new user accounts through the admin panel.
+</Note>
+
+The admin panel provides a form for creating new users:
+
+```php Users/View.php:147
+protected function formNew(): array
+{
+    $form = [
+        'action' => $this->c->Router->link('AdminUsers'),
+        'hidden' => [],
+        'sets'   => [
+            'new' => [
+                'legend' => 'New user',
+                'fields' => [],
+            ]
+        ],
+        'btns'   => [
+            'new' => [
+                'type'  => 'btn',
+                'value' => __('Add'),
+                'href'  => $this->c->Router->link('AdminUsersNew'),
+            ],
+        ],
+    ];
+    
+    return $form;
+}
+```
+
+## Recalculating User Statistics
+
+<Warning>
+Post count recalculation should only be performed in maintenance mode.
+</Warning>
+
+Administrators can recalculate post and topic counts:
+
+```php Users/View.php:460
+public function recalculate(array $args, string $method): Page
+{
+    if (
+        1 !== $this->c->config->b_maintenance
+        || $this->c->MAINTENANCE_OFF
+    ) {
+        return $this->c->Message->message('Maintenance only');
+    }
+    
+    // Verify confirmation and token...
+    
+    if (\function_exists('\\set_time_limit')) {
+        \set_time_limit(0);
+    }
+    
+    $this->c->users->updateCountPosts();
+    $this->c->users->updateCountTopics();
+    
+    return $this->c->Redirect->page('AdminUsers')
+        ->message('Updated the number of users posts redirect', FORK_MESS_SUCC);
+}
+```
+
+### Recalculation Form
+
+```php Users/View.php:501
+protected function formRecalculate(): array
+{
+    $form = [
+        'action' => $this->c->Router->link('AdminUsersRecalculate'),
+        'hidden' => [
+            'token' => $this->c->Csrf->create('AdminUsersRecalculate'),
+        ],
+        'sets'   => [
+            'recalculate' => [
+                'legend' => 'Number of users posts',
+                'fields' => [
+                    'confirm' => [
+                        'type'    => 'checkbox',
+                        'label'   => 'Confirm action',
+                        'checked' => false,
+                    ],
+                ],
+            ],
+        ],
+        'btns'   => [
+            'recalculate' => [
+                'type'  => 'submit',
+                'value' => __('Recalculate'),
+            ],
+        ],
+    ];
+    
+    return $form;
+}
+```
+
+## Group Filtering
+
+Filter users by group membership:
+
+```php Users/View.php:23
+protected function groups(bool $onlyKeys = false): array
+{
+    $groups = [
+        -1 => __('All groups'),
+        0  => __('Unverified users'),
+    ];
+    
+    foreach ($this->c->groups->repository as $group) {
+        if (! $group->groupGuest) {
+            $groups[$group->g_id] = $group->g_title;
+        }
+    }
+    
+    return $onlyKeys ? \array_keys($groups) : $groups;
+}
+```
+
+## Data Encoding/Decoding
+
+Search filters are encoded for URL transmission:
+
+```php Users.php:37
+protected function encodeData(string|array $data): string
+{
+    if (\is_array($data)) {
+        unset($data['token']);
+        
+        $data = \base64_encode(\json_encode($data, FORK_JSON_ENCODE));
+        $hash = $this->c->Secury->hash($data);
+        
+        return "{$data}:{$hash}";
+    } else {
+        return "ip:{$data}";
+    }
+}
+
+protected function decodeData(string $data): array|false
+{
+    $data = \explode(':', $data);
+    
+    if (2 !== \count($data)) {
+        return false;
+    }
+    
+    if ('ip' === $data[0]) {
+        $ip = \filter_var($data[1], \FILTER_VALIDATE_IP);
+        return false === $ip ? false : ['ip' => $ip];
+    }
+    
+    if (
+        ! \hash_equals($data[1], $this->c->Secury->hash($data[0]))
+        || ! \is_array($data = \json_decode(\base64_decode($data[0], true), true))
+    ) {
+        return false;
+    }
+    
+    return $data;
+}
+```
+
+## Best Practices
+
+<Tip>
+**User Management Tips:**
+1. Always verify permissions before performing actions
+2. Use IP search cautiously - multiple users may share IPs
+3. Enable maintenance mode before recalculating statistics
+4. Test search filters with small datasets first
+5. Document admin notes for future reference
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Forum Management" icon="comments" href="/admin/forum-management">
+    Manage forums and categories
+  </Card>
+  <Card title="Permissions" icon="key" href="/admin/permissions">
+    Configure user and group permissions
+  </Card>
+  <Card title="User Groups" icon="user-group" href="/models/user">
+    Learn about user group models
+  </Card>
+  <Card title="Bans" icon="ban" href="/admin/bans">
+    Manage banned users
+  </Card>
+</CardGroup>

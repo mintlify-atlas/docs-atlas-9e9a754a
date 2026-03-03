@@ -1,0 +1,429 @@
+---
+title: Topic Model
+description: Topic model API reference for ForkBB forum software
+---
+
+The `Topic` model represents a discussion topic in ForkBB. It extends `DataModel` and provides properties and methods for managing topics, posts, subscriptions, and table of contents.
+
+## Location
+
+`app/Models/Topic/Topic.php`
+
+## Properties
+
+<ParamField path="id" type="int">
+  Unique topic identifier
+</ParamField>
+
+<ParamField path="subject" type="string">
+  Topic subject/title
+</ParamField>
+
+<ParamField path="forum_id" type="int">
+  ID of the parent forum
+</ParamField>
+
+<ParamField path="poster_id" type="int">
+  ID of the user who created the topic
+</ParamField>
+
+<ParamField path="posted" type="int">
+  Timestamp when topic was created
+</ParamField>
+
+<ParamField path="last_post" type="int">
+  Timestamp of the last post
+</ParamField>
+
+<ParamField path="last_post_id" type="int">
+  ID of the last post
+</ParamField>
+
+<ParamField path="first_post_id" type="int">
+  ID of the first post
+</ParamField>
+
+<ParamField path="num_replies" type="int">
+  Number of replies (posts minus one)
+</ParamField>
+
+<ParamField path="num_views" type="int">
+  Total view count
+</ParamField>
+
+<ParamField path="closed" type="int">
+  Topic closed status (0=open, 1=closed)
+</ParamField>
+
+<ParamField path="sticky" type="int">
+  Sticky/pinned status (0=normal, 1=sticky)
+</ParamField>
+
+<ParamField path="moved_to" type="int|null">
+  ID of topic this was moved to (for move stubs)
+</ParamField>
+
+<ParamField path="poll_type" type="int">
+  Poll type (0=no poll, >0=has poll)
+</ParamField>
+
+<ParamField path="solution" type="int">
+  Post ID marked as solution (0=no solution)
+</ParamField>
+
+<ParamField path="stick_fp" type="int">
+  Whether to stick first post on all pages
+</ParamField>
+
+<ParamField path="toc" type="string|null">
+  JSON-encoded table of contents data
+</ParamField>
+
+<ParamField path="page" type="int">
+  Current page number
+</ParamField>
+
+<ParamField path="subject_color" type="int">
+  Color number for colored subjects
+</ParamField>
+
+## Computed Properties
+
+<ResponseField name="parent" type="Forum|null">
+  Parent forum object
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Censored topic subject
+</ResponseField>
+
+<ResponseField name="friendly" type="string">
+  URL-friendly topic name
+</ResponseField>
+
+<ResponseField name="poll" type="Poll|null">
+  Poll object if topic has a poll, otherwise `null`
+</ResponseField>
+
+<ResponseField name="numPages" type="int">
+  Total number of pages in the topic
+</ResponseField>
+
+<ResponseField name="pagination" type="array">
+  Pagination array for topic pages
+</ResponseField>
+
+<ResponseField name="showViews" type="bool">
+  Whether view counts are enabled
+</ResponseField>
+
+<ResponseField name="tableOfContent" type="array">
+  Formatted table of contents for the topic
+</ResponseField>
+
+<ResponseField name="colorNum" type="int">
+  Color number if colored subjects are enabled
+</ResponseField>
+
+## Permission Properties
+
+<ResponseField name="canReply" type="bool">
+  Returns `true` if current user can reply to this topic
+</ResponseField>
+
+<ResponseField name="canSubscription" type="bool">
+  Returns `true` if current user can subscribe to topic updates
+</ResponseField>
+
+<ResponseField name="canChSolution" type="bool">
+  Returns `true` if current user can change the solution post
+</ResponseField>
+
+## New/Unread Properties
+
+<ResponseField name="hasNew" type="int|false">
+  Timestamp of last visit if topic has new posts, otherwise `false`
+</ResponseField>
+
+<ResponseField name="hasUnread" type="int|false">
+  Timestamp if topic has unread posts, otherwise `false`
+</ResponseField>
+
+<ResponseField name="firstNew" type="int">
+  Post ID of first new post (0 if none)
+</ResponseField>
+
+<ResponseField name="firstUnread" type="int">
+  Post ID of first unread post (0 if none)
+</ResponseField>
+
+## Link Properties
+
+<ResponseField name="link" type="string">
+  URL to the topic page
+</ResponseField>
+
+<ResponseField name="linkReply" type="string">
+  URL to reply to the topic
+</ResponseField>
+
+<ResponseField name="linkLast" type="string">
+  URL to jump to the last post
+</ResponseField>
+
+<ResponseField name="linkNew" type="string">
+  URL to jump to first new post
+</ResponseField>
+
+<ResponseField name="linkUnread" type="string">
+  URL to jump to first unread post
+</ResponseField>
+
+<ResponseField name="linkSubscribe" type="string">
+  URL to subscribe to topic
+</ResponseField>
+
+<ResponseField name="linkUnsubscribe" type="string">
+  URL to unsubscribe from topic
+</ResponseField>
+
+<ResponseField name="linkCrumbExt" type="string|null">
+  Extended breadcrumb link (for scrolling to topic in forum)
+</ResponseField>
+
+<ResponseField name="linkGoToSolution" type="string">
+  URL to jump to the solution post
+</ResponseField>
+
+## Methods
+
+### hasPage()
+
+Checks if the current page number is valid for this topic.
+
+```php
+public function hasPage(): bool
+```
+
+**Returns:** `bool` - `true` if page is valid
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$topic->page = 2;
+
+if ($topic->hasPage()) {
+    $posts = $topic->pageData();
+}
+```
+
+### pageData()
+
+Returns an array of posts for the current page.
+
+```php
+public function pageData(): array
+```
+
+**Returns:** Array of post objects
+
+**Throws:** `InvalidArgumentException` if page number is invalid
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$topic->page = 1;
+
+$posts = $topic->pageData();
+foreach ($posts as $post) {
+    echo $post->html();
+}
+```
+
+### review()
+
+Returns posts for topic review (latest posts in reverse order).
+
+```php
+public function review(): array
+```
+
+**Returns:** Array of recent posts (limited by config)
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$recentPosts = $topic->review();
+```
+
+### calcPage()
+
+Calculates which page a specific post is on.
+
+```php
+public function calcPage(int $pid): void
+```
+
+<ParamField path="pid" type="int">
+  Post ID to find
+</ParamField>
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$topic->calcPage(456); // Find page for post 456
+
+if ($topic->page !== null) {
+    echo "Post is on page {$topic->page}";
+}
+```
+
+### incViews()
+
+Increments the view count for the topic.
+
+```php
+public function incViews(): void
+```
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$topic->incViews();
+```
+
+### updateVisits()
+
+Updates the current user's last visit and last read markers for this topic.
+
+```php
+public function updateVisits(): void
+```
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$topic->updateVisits(); // Mark as visited
+```
+
+### addPostToToc()
+
+Adds or updates a post in the topic's table of contents.
+
+```php
+public function addPostToToc(Post $post, bool $merge = false): Topic
+```
+
+<ParamField path="post" type="Post">
+  The post to add (must be parsed by Parser first)
+</ParamField>
+
+<ParamField path="merge" type="bool">
+  Whether to merge with existing TOC entries
+</ParamField>
+
+**Returns:** Self for method chaining
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$post = $container->posts->load(456);
+
+// Parse post first
+$container->Parser->parseMessage($post->message);
+
+// Add to TOC
+$topic->addPostToToc($post);
+$container->topics->update($topic);
+```
+
+### deleteFromToc()
+
+Removes specific posts from the table of contents.
+
+```php
+public function deleteFromToc(int ...$ids): Topic
+```
+
+<ParamField path="ids" type="int...">
+  Variable number of post IDs to remove
+</ParamField>
+
+**Returns:** Self for method chaining
+
+**Example:**
+```php
+$topic = $container->topics->load(123);
+$topic->deleteFromToc(456, 457, 458);
+$container->topics->update($topic);
+```
+
+## Usage Example
+
+```php
+// Load a topic
+$topic = $container->topics->load(123);
+
+// Display topic info
+echo "<h1>{$topic->name}</h1>";
+echo "<p>Posted: " . date('Y-m-d', $topic->posted) . "</p>";
+echo "<p>Replies: {$topic->num_replies}, Views: {$topic->num_views}</p>";
+
+// Check status
+if ($topic->closed) {
+    echo "<p>This topic is closed.</p>";
+}
+
+if ($topic->sticky) {
+    echo "<p><strong>Pinned</strong></p>";
+}
+
+// Check permissions
+if ($topic->canReply) {
+    echo "<a href=\"{$topic->linkReply}\">Reply</a>";
+}
+
+// Display new/unread indicators
+if ($topic->hasNew !== false) {
+    echo "<a href=\"{$topic->linkNew}\">Jump to new posts</a>";
+}
+
+if ($topic->hasUnread !== false) {
+    echo "<a href=\"{$topic->linkUnread}\">Unread posts</a>";
+}
+
+// Get posts for page 1
+$topic->page = 1;
+if ($topic->hasPage()) {
+    $posts = $topic->pageData();
+    foreach ($posts as $post) {
+        echo "<div class='post'>";
+        echo "<strong>{$post->user->username}</strong><br>";
+        echo $post->html();
+        echo "</div>";
+    }
+}
+
+// Display table of contents
+$toc = $topic->tableOfContent;
+if (!empty($toc)) {
+    echo "<nav><h3>Table of Contents</h3><ul>";
+    foreach ($toc as $item) {
+        echo "<li style='margin-left: {$item['level']}em;'>";
+        echo "<a href=\"{$item['url']}\">{$item['value']}</a>";
+        echo "</li>";
+    }
+    echo "</ul></nav>";
+}
+
+// Display solution link if exists
+if ($topic->solution > 0 && $topic->linkGoToSolution) {
+    echo "<a href=\"{$topic->linkGoToSolution}\">View Solution</a>";
+}
+
+// Get poll if exists
+if ($topic->poll) {
+    echo "<h3>Poll</h3>";
+    // Display poll data
+}
+```

@@ -1,0 +1,714 @@
+---
+title: Forums & Topics
+description: Forum hierarchy, categories, topics, posts, and content organization in ForkBB
+icon: comments
+---
+
+## Overview
+
+ForkBB uses a hierarchical structure to organize discussions: **Categories** contain **Forums**, which contain **Topics**, which contain **Posts**. This flexible system supports complex discussion boards with granular permissions.
+
+## Forum Hierarchy
+
+<Steps>
+  <Step title="Categories">
+    Top-level organizational containers that group related forums together
+  </Step>
+  
+  <Step title="Forums">
+    Discussion areas that contain topics. Forums can have subforums for deeper organization
+  </Step>
+  
+  <Step title="Topics">
+    Individual discussion threads started by users
+  </Step>
+  
+  <Step title="Posts">
+    Individual messages within a topic thread
+  </Step>
+</Steps>
+
+## Categories
+
+Categories provide the highest level of organization, implemented in `app/Models/Category/Categories.php:20`.
+
+### Category Management
+
+```php app/Models/Category/Categories.php
+public function init(): Categories
+{
+    $query = 'SELECT c.id, c.cat_name, c.disp_position
+        FROM ::categories AS c
+        ORDER BY c.disp_position';
+    
+    $this->repository = $this->c->DB->query($query)->fetchAll(PDO::FETCH_UNIQUE);
+    
+    return $this;
+}
+
+public function insert(string $name): int
+{
+    $pos = 0;
+    
+    foreach ($this->repository as $cat) {
+        if ($cat['disp_position'] > $pos) {
+            $pos = $cat['disp_position'];
+        }
+    }
+    
+    ++$pos;
+    
+    $vars = [
+        ':name'     => $name,
+        ':position' => $pos,
+    ];
+    $query = 'INSERT INTO ::categories (cat_name, disp_position)
+        VALUES (?s:name, ?i:position)';
+    
+    $this->c->DB->exec($query, $vars);
+    
+    $cid = (int) $this->c->DB->lastInsertId();
+    
+    parent::set($cid, ['cat_name' => $name, 'disp_position' => $pos]);
+    
+    return $cid;
+}
+```
+
+<Note>
+  Categories are ordered by `disp_position` and can be reordered without affecting forum IDs.
+</Note>
+
+## Forums
+
+Forums are the core discussion containers, implemented in `app/Models/Forum/Forum.php:19`.
+
+### Forum Structure
+
+```php app/Models/Forum/Forum.php
+protected function getparent(): ?Forum
+{
+    if (null === $this->parent_forum_id) {
+        if (0 !== $this->id) {
+            throw new RuntimeException('Parent is not defined');
+        }
+        
+        return null;
+    } else {
+        return $this->manager->get($this->parent_forum_id);
+    }
+}
+
+protected function getsubforums(): array
+{
+    $sub  = [];
+    $attr = $this->getModelAttr('subforums');
+    
+    if (\is_array($attr)) {
+        foreach ($attr as $id) {
+            $sub[$id] = $this->manager->get($id);
+        }
+    }
+    
+    return $sub;
+}
+
+protected function getdescendants(): array
+{
+    $all  = [];
+    $attr = $this->getModelAttr('descendants');
+    
+    if (\is_array($attr)) {
+        foreach ($attr as $id) {
+            $all[$id] = $this->manager->get($id);
+        }
+    }
+    
+    return $all;
+}
+```
+
+### Forum Properties
+
+<CardGroup cols={2}>
+  <Card title="Name & Description" icon="tag">
+    Each forum has a name and optional description for users
+  </Card>
+  
+  <Card title="Parent/Child" icon="sitemap">
+    Forums can have parent forums and multiple subforums
+  </Card>
+  
+  <Card title="Moderators" icon="user-shield">
+    Specific users can be assigned as moderators
+  </Card>
+  
+  <Card title="Statistics" icon="chart-bar">
+    Topics, posts, and last post information tracked
+  </Card>
+</CardGroup>
+
+### Forum Links
+
+```php app/Models/Forum/Forum.php
+protected function getlink(): string
+{
+    if (0 === $this->id) {
+        return $this->c->Router->link('Index');
+    } else {
+        return $this->c->Router->link(
+            'Forum',
+            [
+                'id'   => $this->id,
+                'name' => $this->friendly,
+            ]
+        );
+    }
+}
+
+protected function getlinkCreateTopic(): string
+{
+    return $this->c->Router->link(
+        'NewTopic',
+        [
+            'id' => $this->id,
+        ]
+    );
+}
+```
+
+## Forum Permissions
+
+Forums have granular permission controls:
+
+### Topic Creation
+
+```php app/Models/Forum/Forum.php
+protected function getcanCreateTopic(): bool
+{
+    $user = $this->c->user;
+    
+    return 1 === $this->post_topics
+        || (
+            null === $this->post_topics
+            && 1 === $user->g_post_topics
+        )
+        || $user->isAdmin
+        || $user->isModerator($this);
+}
+```
+
+### Subscriptions
+
+```php app/Models/Forum/Forum.php
+protected function getcanSubscription(): bool
+{
+    return 1 === $this->c->config->b_forum_subscriptions
+        && $this->id > 0
+        && ! $this->c->user->isGuest
+        && ! $this->c->user->isUnverified;
+}
+```
+
+<Info>
+  Admins and moderators can override forum-level permissions.
+</Info>
+
+## Forum Moderators
+
+```php app/Models/Forum/Forum.php
+protected function getmoderators(): array
+{
+    $attr = $this->getModelAttr('moderators');
+    
+    if (
+        empty($attr)
+        || ! \is_array($attr)
+    ) {
+        return [];
+    }
+    
+    $viewUsers = $this->c->userRules->viewUsers;
+    
+    foreach ($attr as $id => &$cur) {
+        $cur = [
+            'name' => $cur,
+            'link' => $viewUsers ?
+                $this->c->Router->link(
+                    'User',
+                    [
+                        'id'   => $id,
+                        'name' => $this->c->Func->friendly($cur),
+                    ]
+                )
+                : null,
+        ];
+    }
+    
+    unset($cur);
+    
+    return $attr;
+}
+
+public function modAdd(User ...$users): void
+{
+    $attr = $this->getModelAttr('moderators');
+    
+    if (
+        empty($attr)
+        || ! \is_array($attr)
+    ) {
+        $attr = [];
+    }
+    
+    foreach ($users as $user) {
+        if (! $user instanceof User) {
+            throw new InvalidArgumentException('Expected User');
+        }
+        
+        $attr[$user->id] = $user->username;
+    }
+    
+    $this->moderators = $attr;
+}
+```
+
+## Topics
+
+Topics are individual discussion threads, implemented in `app/Models/Topic/Topic.php:21`.
+
+### Topic Properties
+
+```php app/Models/Topic/Topic.php
+protected function getparent(): ?Forum
+{
+    if ($this->forum_id < 1) {
+        throw new RuntimeException('Parent is not defined');
+    }
+    
+    $forum = $this->c->forums->get($this->forum_id);
+    
+    if (
+        ! $forum instanceof Forum
+        || $forum->redirect_url
+    ) {
+        return null;
+    } else {
+        return $forum;
+    }
+}
+
+protected function getname(): ?string
+{
+    return $this->censorSubject;
+}
+
+protected function getfriendly(): ?string
+{
+    return $this->c->Func->friendly($this->name);
+}
+```
+
+### Topic Status
+
+<CardGroup cols={2}>
+  <Card title="Open/Closed" icon="lock">
+    Topics can be closed to prevent new replies
+  </Card>
+  
+  <Card title="Sticky" icon="thumbtack">
+    Important topics can be pinned to the top
+  </Card>
+  
+  <Card title="Moved" icon="arrows">
+    Topics can be moved between forums
+  </Card>
+  
+  <Card title="Deleted" icon="trash">
+    Topics can be soft or hard deleted
+  </Card>
+</CardGroup>
+
+### Reply Permissions
+
+```php app/Models/Topic/Topic.php
+protected function getcanReply(): bool
+{
+    if ($this->moved_to) {
+        return false;
+    } elseif ($this->c->user->isAdmin) {
+        return true;
+    } elseif (
+        $this->closed
+        || $this->c->user->isBot
+    ) {
+        return false;
+    } elseif (
+        1 === $this->parent->post_replies
+        || (
+            null === $this->parent->post_replies
+            && 1 === $this->c->user->g_post_replies
+        )
+        || $this->c->user->isModerator($this)
+    ) {
+        return true;
+    } else {
+        return false;
+    }
+}
+```
+
+## Topic Links
+
+```php app/Models/Topic/Topic.php
+protected function getlink(): string
+{
+    return $this->c->Router->link(
+        'Topic',
+        [
+            'id'   => $this->moved_to ?: $this->id,
+            'name' => $this->friendly,
+        ]
+    );
+}
+
+protected function getlinkReply(): string
+{
+    return $this->c->Router->link(
+        'NewReply',
+        [
+            'id' => $this->id,
+        ]
+    );
+}
+
+protected function getlinkLast(): string
+{
+    if (
+        $this->moved_to
+        || $this->last_post_id < 1
+    ) {
+        return '';
+    } else {
+        return $this->c->Router->link(
+            'Topic',
+            [
+                'id'   => $this->moved_to ?: $this->id,
+                'name' => $this->friendly,
+                'page' => $this->numPages,
+                '#'    => 'p' . $this->last_post_id,
+            ]
+        );
+    }
+}
+```
+
+## Read Tracking
+
+ForkBB tracks which posts users have read:
+
+### New Messages
+
+```php app/Models/Topic/Topic.php
+protected function gethasNew(): int|false
+{
+    if (
+        $this->c->user->isGuest
+        || $this->moved_to
+    ) {
+        return false;
+    }
+    
+    $time = \max(
+        (int) $this->c->user->u_mark_all_read,
+        (int) $this->parent->mf_mark_all_read,
+        (int) $this->c->user->last_visit,
+        (int) $this->mt_last_visit
+    );
+    
+    return $this->last_post > $time ? $time : false;
+}
+
+protected function getfirstNew(): int
+{
+    if (false === $this->hasNew) {
+        return 0;
+    } elseif ($this->posted > $this->hasNew) {
+        return $this->first_post_id;
+    }
+    
+    $vars = [
+        ':tid'   => $this->id,
+        ':visit' => $this->hasNew,
+    ];
+    $query = 'SELECT MIN(p.id)
+        FROM ::posts AS p
+        WHERE p.topic_id=?i:tid AND p.posted>?i:visit';
+    
+    return (int) $this->c->DB->query($query, $vars)->fetchColumn();
+}
+```
+
+### Visit Tracking
+
+```php app/Models/Topic/Topic.php
+public function updateVisits(): void
+{
+    if ($this->c->user->isGuest) {
+        return;
+    }
+    
+    $vars = [
+        ':uid'   => $this->c->user->id,
+        ':tid'   => $this->id,
+        ':read'  => (int) $this->mt_last_read,
+        ':visit' => (int) $this->mt_last_visit,
+    ];
+    $flag = false;
+    
+    if (false !== $this->hasNew) {
+        $flag           = true;
+        $vars[':visit'] = $this->last_post;
+    }
+    
+    if (
+        false !== $this->hasUnread
+        && $this->timeMax > $this->hasUnread
+    ) {
+        $flag           = true;
+        $vars[':read']  = $this->timeMax;
+        $vars[':visit'] = $this->last_post;
+    }
+    
+    if ($flag) {
+        // Insert or update mark_of_topic record
+        // ...
+    }
+}
+```
+
+<Note>
+  Visit tracking allows users to see which topics have new posts since their last visit.
+</Note>
+
+## Pagination
+
+### Forum Pagination
+
+```php app/Models/Forum/Forum.php
+protected function getnumPages(): int
+{
+    if (! \is_int($this->num_topics)) {
+        throw new RuntimeException('The model does not have the required data');
+    }
+    
+    return (int) \ceil(($this->num_topics ?: 1) / $this->c->user->disp_topics);
+}
+
+protected function getpagination(): array
+{
+    return $this->c->Func->paginate(
+        $this->numPages,
+        $this->page,
+        'Forum',
+        [
+            'id'   => $this->id,
+            'name' => $this->friendly,
+        ]
+    );
+}
+
+public function pageData(): array
+{
+    if (! $this->hasPage()) {
+        throw new InvalidArgumentException('Bad number of displayed page');
+    }
+    
+    if (empty($this->num_topics)) {
+        return [];
+    }
+    
+    $this->createIdsList(
+        $this->c->user->disp_topics,
+        ($this->page - 1) * $this->c->user->disp_topics
+    );
+    
+    return empty($this->idsList) ? [] : $this->c->topics->view($this);
+}
+```
+
+### Topic Pagination
+
+```php app/Models/Topic/Topic.php
+protected function getnumPages(): int
+{
+    if (null === $this->num_replies) {
+        throw new RuntimeException('The model does not have the required data');
+    }
+    
+    return (int) \ceil(($this->num_replies + 1) / $this->c->user->disp_posts);
+}
+
+public function pageData(): array
+{
+    if (! $this->hasPage()) {
+        throw new InvalidArgumentException('Bad number of displayed page');
+    }
+    
+    $vars = [
+        ':tid'    => $this->id,
+        ':offset' => ($this->page - 1) * $this->c->user->disp_posts,
+        ':rows'   => $this->c->user->disp_posts,
+    ];
+    $query = 'SELECT p.id
+        FROM ::posts AS p
+        WHERE p.topic_id=?i:tid
+        ORDER BY p.id
+        LIMIT ?i:rows OFFSET ?i:offset';
+    
+    $list = $this->c->DB->query($query, $vars)->fetchAll(PDO::FETCH_COLUMN);
+    
+    $this->idsList = $list;
+    
+    return empty($this->idsList) ? [] : $this->c->posts->view($this);
+}
+```
+
+## Topic Views
+
+View counting can be enabled for topics:
+
+```php app/Models/Topic/Topic.php
+protected function getshowViews(): bool
+{
+    return 1 === $this->c->config->b_topic_views;
+}
+
+public function incViews(): void
+{
+    $vars = [
+        ':tid' => $this->id,
+    ];
+    $query = 'UPDATE ::topics
+        SET num_views=num_views+1
+        WHERE id=?i:tid';
+    
+    $this->c->DB->exec($query, $vars);
+}
+```
+
+## Topic Solutions
+
+Forums can enable solution marking for Q&A style discussions:
+
+```php app/Models/Topic/Topic.php
+protected function getcanChSolution(): bool
+{
+    return 1 === $this->parent->use_solution
+        && (
+            $this->c->user->isAdmin
+            || (
+                $this->c->user->id === $this->poster_id
+                && ! $this->c->user->isGuest
+            )
+        );
+}
+```
+
+## Table of Contents
+
+Topics can automatically generate a table of contents from headers:
+
+```php app/Models/Topic/Topic.php
+protected array $idsLevel = [
+    'h1' => 1,
+    'h2' => 2,
+    'h'  => 3,
+    'h3' => 3,
+    'h4' => 4,
+    'h5' => 5,
+    'h6' => 6,
+];
+
+public function addPostToToc(Post $post, bool $merge = false): Topic
+{
+    if (
+        $post->poster_id < 1
+        || $this->poster_id !== $post->poster_id
+        || (
+            empty($this->toc)
+            && $this->first_post_id !== $post->id
+        )
+    ) {
+        return $this;
+    }
+    
+    $ids = $this->c->Parser->getIds(...(\array_keys($this->idsLevel)));
+    
+    if (empty($ids)) {
+        if ($merge) {
+            return $this;
+        } elseif ($this->first_post_id === $post->id) {
+            $this->toc = null;
+            return $this;
+        }
+    }
+    
+    $r = [];
+    
+    foreach ($ids as $id => $tag) {
+        $text  = \preg_replace('%^\s+|\s+$%uD', '', $this->c->Parser->getText($id));
+        $ident = $this->c->Parser->createIdentifier($text);
+        $r[]   = [$this->idsLevel[$tag], $ident, $text];
+    }
+    
+    $toc = $this->toc ? \json_decode($this->toc, true, 512, \JSON_THROW_ON_ERROR) : [];
+    
+    if (
+        $merge
+        && ! empty($toc[$post->id])
+    ) {
+        $toc[$post->id] = \array_merge($toc[$post->id], $r);
+    } else {
+        $toc[$post->id] = $r;
+    }
+    
+    \ksort($toc, \SORT_NUMERIC);
+    
+    $this->toc = \json_encode($toc, FORK_JSON_ENCODE);
+    
+    return $this;
+}
+```
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="BBCode" icon="code" href="/features/bbcode">
+    Learn about post formatting with BBCode
+  </Card>
+  
+  <Card title="Search" icon="search" href="/features/search">
+    Search topics and posts across forums
+  </Card>
+  
+  <Card title="Moderation" icon="shield" href="/features/moderation">
+    Moderate content and manage forums
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Forum Organization">
+    Use categories to logically group related forums. Keep the hierarchy shallow (2-3 levels max) for better usability.
+  </Accordion>
+  
+  <Accordion title="Permissions">
+    Set permissions at the forum level when possible. Use moderators for specific forums rather than global moderation.
+  </Accordion>
+  
+  <Accordion title="Performance">
+    Cache forum trees and statistics. Use pagination to limit database queries for large forums.
+  </Accordion>
+</AccordionGroup>

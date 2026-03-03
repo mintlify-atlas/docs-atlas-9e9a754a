@@ -1,0 +1,586 @@
+---
+title: Views & Templates
+description: Template system, rendering, and the View class in ForkBB
+icon: 'eye'
+---
+
+## Overview
+
+ForkBB uses a custom template engine that compiles templates to native PHP. The View system provides:
+
+- **Template compilation** to PHP with caching
+- **Template inheritance** (extends/blocks)
+- **Automatic escaping** for security
+- **View composers** for shared data
+- **Theme support** with fallback
+
+<Note>
+Template files use the `.forkbb.php` extension and are located in `app/templates/`
+</Note>
+
+## View Class
+
+The View class handles template compilation and rendering:
+
+```php app/Core/View.php
+class View
+{
+    protected string $ext = '.forkbb.php';
+    protected string $cacheDir;        // Compiled templates
+    protected string $defaultDir;      // Default theme
+    
+    public function __construct(string|array $config, mixed $views)
+    
+    // Render a page
+    public function rendering(Page $p, bool $sendHeaders = true): ?string
+    
+    // Fetch a template
+    public function fetch(string $name, array $data = []): string
+    
+    // Add template directories
+    public function addTplDir(string $pathToDir, int $priority): View
+    
+    // Register view composer
+    public function composer(string|array $name, mixed $composer): void
+}
+```
+
+## Template Locations
+
+```
+app/templates/
+├── _default/           # Default theme (always available)
+│   ├── layouts/
+│   │   ├── main.forkbb.php
+│   │   └── admin.forkbb.php
+│   ├── index.forkbb.php
+│   ├── forum.forkbb.php
+│   ├── topic.forkbb.php
+│   └── ...
+└── _user/              # User theme (overrides _default)
+    ├── style1/
+    └── style2/
+```
+
+<Warning>
+User templates in `_user/` override default templates. The system checks user directories first, then falls back to `_default/`.
+</Warning>
+
+## Template Syntax
+
+### Basic Template
+
+```php index.forkbb.php
+@extends('layouts/main')
+
+@section('content')
+<div class="main-content">
+    <h1>{{ $p->pageTitle }}</h1>
+    
+    @if($p->user->isGuest)
+        <p>Welcome, Guest!</p>
+    @else
+        <p>Hello, {{ e($p->user->username) }}!</p>
+    @endif
+    
+    @foreach($p->forums as $forum)
+        <div class="forum">
+            <a href="{{ $forum->link }}">{{ e($forum->forum_name) }}</a>
+            <p>{{ e($forum->forum_desc) }}</p>
+        </div>
+    @endforeach
+</div>
+@endsection
+```
+
+### Template Inheritance
+
+<Tabs>
+  <Tab title="Layout">
+    ```php layouts/main.forkbb.php
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>{{ $p->pageTitle }}</title>
+        @section('styles')
+            <link rel="stylesheet" href="/style/main.css">
+        @show
+    </head>
+    <body id="fork" class="{{ $p->identifier }}">
+        @section('header')
+            <header>
+                <h1>{{ e($p->fTitle) }}</h1>
+                @include('partials/navigation')
+            </header>
+        @show
+        
+        <main>
+            @yield('content')
+        </main>
+        
+        @section('footer')
+            <footer>
+                <p>&copy; 2024 Forum</p>
+            </footer>
+        @show
+        
+        @section('scripts')
+            <script src="/js/common.js"></script>
+        @show
+    </body>
+    </html>
+    ```
+  </Tab>
+  
+  <Tab title="Child Template">
+    ```php forum.forkbb.php
+    @extends('layouts/main')
+    
+    @section('styles')
+        @parent
+        <link rel="stylesheet" href="/style/forum.css">
+    @endsection
+    
+    @section('content')
+    <div class="forum-view">
+        <h2>{{ e($p->forum->forum_name) }}</h2>
+        
+        @if($p->forum->canCreateTopic)
+            <a href="{{ $p->forum->linkCreateTopic }}" class="btn">
+                New Topic
+            </a>
+        @endif
+        
+        <div class="topics">
+            @foreach($p->topics as $topic)
+                @include('partials/topic-row', ['topic' => $topic])
+            @endforeach
+        </div>
+        
+        @if($p->pagination)
+            @include('partials/pagination', ['pages' => $p->pagination])
+        @endif
+    </div>
+    @endsection
+    
+    @section('scripts')
+        @parent
+        <script src="/js/forum.js"></script>
+    @endsection
+    ```
+  </Tab>
+</Tabs>
+
+### Directives
+
+<AccordionGroup>
+  <Accordion title="@extends">
+    Specify parent template for inheritance.
+    
+    ```php
+    @extends('layouts/main')
+    ```
+  </Accordion>
+  
+  <Accordion title="@section / @endsection">
+    Define or override a section.
+    
+    ```php
+    @section('content')
+        <div>Content here</div>
+    @endsection
+    ```
+  </Accordion>
+  
+  <Accordion title="@yield">
+    Display a section's content.
+    
+    ```php
+    @yield('content')
+    ```
+  </Accordion>
+  
+  <Accordion title="@show">
+    End section and display it (for layout sections).
+    
+    ```php
+    @section('header')
+        <header>...</header>
+    @show
+    ```
+  </Accordion>
+  
+  <Accordion title="@parent">
+    Include parent section's content.
+    
+    ```php
+    @section('scripts')
+        @parent
+        <script src="/js/my-script.js"></script>
+    @endsection
+    ```
+  </Accordion>
+  
+  <Accordion title="@include">
+    Include another template.
+    
+    ```php
+    @include('partials/navigation')
+    @include('partials/post', ['post' => $post])
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Control Structures
+
+```php
+<!-- If statements -->
+@if($condition)
+    <p>True</p>
+@elseif($other)
+    <p>Other</p>
+@else
+    <p>False</p>
+@endif
+
+<!-- Unless -->
+@unless($user->isGuest)
+    <p>Logged in</p>
+@endunless
+
+<!-- Loops -->
+@foreach($items as $item)
+    <div>{{ e($item) }}</div>
+@endforeach
+
+@for($i = 0; $i < 10; $i++)
+    <p>{{ $i }}</p>
+@endfor
+
+@while($condition)
+    <p>Looping...</p>
+@endwhile
+
+<!-- Empty check -->
+@forelse($posts as $post)
+    <div>{{ e($post->message) }}</div>
+@empty
+    <p>No posts found</p>
+@endforelse
+```
+
+## Output and Escaping
+
+<Warning>
+Always escape user-generated content to prevent XSS attacks!
+</Warning>
+
+```php
+<!-- Escaped output (safe) -->
+{{ e($user->username) }}
+{{ e($post->message) }}
+
+<!-- Raw output (dangerous - only for trusted content) -->
+{!! $p->htmlContent !!}
+
+<!-- Function call -->
+{{ e($c->Func->friendly($name)) }}
+
+<!-- Ternary -->
+{{ $user->isAdmin ? 'Admin' : 'User' }}
+```
+
+The `e()` function escapes HTML entities:
+
+```php
+function e(mixed $value): string {
+    return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+```
+
+## Accessing Page Data
+
+The page object is available as `$p`:
+
+```php
+<!-- Page properties -->
+{{ e($p->pageTitle) }}
+{{ e($p->fTitle) }}
+{{ $p->canonical }}
+
+<!-- User data -->
+{{ e($p->user->username) }}
+{{ $p->user->isAdmin }}
+{{ $p->user->id }}
+
+<!-- Page-specific data -->
+@foreach($p->forums as $forum)
+    {{ e($forum->forum_name) }}
+@endforeach
+
+@foreach($p->topics as $topic)
+    {{ e($topic->subject) }}
+@endforeach
+```
+
+## Partials and Components
+
+### Including Partials
+
+```php
+<!-- Simple include -->
+@include('partials/header')
+
+<!-- Include with data -->
+@include('partials/post', [
+    'post' => $post,
+    'showActions' => true
+])
+
+<!-- Conditional include -->
+@if($showSidebar)
+    @include('partials/sidebar')
+@endif
+```
+
+### Reusable Components
+
+```php partials/topic-row.forkbb.php
+<div class="topic-row">
+    <div class="topic-icon">
+        @if($topic->icon)
+            <img src="{{ $topic->icon }}" alt="">
+        @endif
+    </div>
+    
+    <div class="topic-main">
+        <h3>
+            <a href="{{ $topic->link }}">{{ e($topic->subject) }}</a>
+        </h3>
+        <p class="topic-meta">
+            By {{ e($topic->poster) }}
+            on {{ date('Y-m-d H:i', $topic->posted) }}
+        </p>
+    </div>
+    
+    <div class="topic-stats">
+        <span>{{ $topic->num_replies }} replies</span>
+        <span>{{ $topic->num_views }} views</span>
+    </div>
+    
+    <div class="topic-last">
+        @if($topic->last_post)
+            <a href="{{ $topic->linkLast }}">Last Post</a>
+        @endif
+    </div>
+</div>
+```
+
+Usage:
+
+```php
+@foreach($p->topics as $topic)
+    @include('partials/topic-row', ['topic' => $topic])
+@endforeach
+```
+
+## View Composers
+
+View composers inject data into templates automatically:
+
+```php config/main.dist.php
+'View' => [
+    'class' => \ForkBB\Core\View::class,
+    'config' => [
+        'composers' => [
+            '*' => function($view) {
+                // Available in all templates
+                return [
+                    'siteName' => 'My Forum',
+                    'year' => date('Y'),
+                ];
+            },
+            'forum*' => function($view) {
+                // Available in forum.forkbb.php and forum-*.forkbb.php
+                return [
+                    'forumSpecificData' => '...',
+                ];
+            },
+        ],
+    ],
+]
+```
+
+## Template Compilation
+
+Templates are automatically compiled to PHP and cached:
+
+<Steps>
+  <Step title="First Request">
+    Template is compiled to PHP and cached in `app/cache/`
+  </Step>
+  
+  <Step title="Subsequent Requests">
+    Cached PHP file is used (fast!)
+  </Step>
+  
+  <Step title="Template Changed">
+    Cache is automatically invalidated and recompiled
+  </Step>
+</Steps>
+
+### Compiled Template Example
+
+```php Original Template
+@extends('layouts/main')
+
+@section('content')
+    <h1>{{ e($p->pageTitle) }}</h1>
+    @foreach($p->items as $item)
+        <div>{{ e($item->name) }}</div>
+    @endforeach
+@endsection
+```
+
+```php Compiled Output (cached)
+<?php $this->extend('layouts/main'); ?>
+
+<?php $this->beginBlock('content'); ?>
+    <h1><?= e($p->pageTitle) ?></h1>
+    <?php foreach($p->items as $item): ?>
+        <div><?= e($item->name) ?></div>
+    <?php endforeach; ?>
+<?php $this->endBlock(); ?>
+```
+
+## Rendering Process
+
+The view rendering process:
+
+```php
+// In controller
+$page->nameTpl = 'forum';  // Set template name
+return $page;
+
+// In bootstrap.php
+$tpl = $c->View->rendering($page);
+exit($tpl);
+
+// View class
+public function rendering(Page $p, bool $sendHeaders = true): ?string
+{
+    if (null === $p->nameTpl) {
+        return null;  // No template
+    }
+    
+    // Compile template if needed
+    $compiled = $this->prepare($p->nameTpl);
+    
+    // Execute compiled template
+    require $compiled;
+    
+    // Return rendered HTML
+    return $this->block('content');
+}
+```
+
+## Creating Custom Templates
+
+### Step 1: Create Template File
+
+```php app/templates/_default/my-page.forkbb.php
+@extends('layouts/main')
+
+@section('content')
+<div class="my-page">
+    <h1>{{ e($p->heading) }}</h1>
+    
+    @if($p->items)
+        <ul>
+            @foreach($p->items as $item)
+                <li>{{ e($item) }}</li>
+            @endforeach
+        </ul>
+    @else
+        <p>No items found.</p>
+    @endif
+</div>
+@endsection
+```
+
+### Step 2: Use in Controller
+
+```php
+public function myAction(array $args, string $method): Page
+{
+    $page = $this->c->MyPage->create();
+    $page->nameTpl = 'my-page';  // References my-page.forkbb.php
+    $page->heading = 'My Custom Page';
+    $page->items = ['Item 1', 'Item 2', 'Item 3'];
+    
+    return $page;
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always Escape Output">
+    Use `e()` for all user-generated content.
+    
+    ```php
+    <!-- Good -->
+    {{ e($user->username) }}
+    
+    <!-- Bad -->
+    {{ $user->username }}
+    ```
+  </Accordion>
+  
+  <Accordion title="Keep Logic in Models">
+    Templates should display data, not contain business logic.
+    
+    ```php
+    <!-- Good -->
+    @if($topic->canReply)
+        <button>Reply</button>
+    @endif
+    
+    <!-- Bad -->
+    @if($topic->closed == 0 && $user->g_post_replies == 1)
+        <button>Reply</button>
+    @endif
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Partials for Reusable Content">
+    Extract repeated markup into partials.
+    
+    ```php
+    @include('partials/user-badge', ['user' => $post->user])
+    ```
+  </Accordion>
+  
+  <Accordion title="Leverage Template Inheritance">
+    Use layouts to avoid repeating HTML structure.
+    
+    ```php
+    @extends('layouts/main')
+    @section('content')
+        <!-- Only page-specific content -->
+    @endsection
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Controllers" icon="gears" href="/controllers">
+    Pass data to templates from controllers
+  </Card>
+  <Card title="Models" icon="database" href="/models">
+    Display model data in templates
+  </Card>
+</CardGroup>

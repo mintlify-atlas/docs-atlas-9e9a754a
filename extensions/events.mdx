@@ -1,0 +1,377 @@
+---
+title: Event System
+description: Learn how to use ForkBB's event system to hook into application lifecycle and customize behavior
+---
+
+## Overview
+
+ForkBB uses an event system that allows extensions to hook into various points in the application lifecycle. Events are dispatched at key moments, and extensions can register listeners to respond to these events.
+
+## How Events Work
+
+The event system consists of three main components:
+
+1. **Event** - Object containing event data and state
+2. **EventDispatcher** - Manages and dispatches events to listeners
+3. **EventListener** - Base class for listeners that respond to events
+
+## The Event Class
+
+Events extend `stdClass` and provide control over propagation:
+
+```php
+namespace ForkBB\Core;
+
+use stdClass;
+
+class Event extends stdClass
+{
+    protected bool $propagationStopped = false;
+
+    public function __construct(protected string $eventName)
+    {
+    }
+
+    public function getName(): string
+    {
+        return $this->eventName;
+    }
+
+    public function isStopped(): bool
+    {
+        return $this->propagationStopped;
+    }
+
+    public function stopPropagation(): void
+    {
+        $this->propagationStopped = true;
+    }
+}
+```
+
+Events can carry arbitrary data as properties since they extend `stdClass`:
+
+```php
+$event = new Event('my:event');
+$event->data = ['key' => 'value'];
+$event->user = $currentUser;
+```
+
+## The EventDispatcher
+
+The EventDispatcher loads event listeners and dispatches events:
+
+```php
+namespace ForkBB\Core;
+
+class EventDispatcher
+{
+    public function dispatch(Event $event): void
+    {
+        $name = $event->getName();
+
+        if (empty($this->eventList[$name])) {
+            return;
+        }
+
+        foreach ($this->eventList[$name] as $listener) {
+            if (empty($this->listeners[$listener])) {
+                $this->listeners[$listener] = new $listener($this->c);
+            }
+
+            $this->listeners[$listener]->listen($event);
+
+            if (true === $event->isStopped()) {
+                return;
+            }
+        }
+    }
+}
+```
+
+Listeners are instantiated once and reused for subsequent events.
+
+## Creating Event Listeners
+
+To create an event listener, extend the `EventListener` base class:
+
+```php
+namespace MyCompany\HelloWorld\Listeners;
+
+use ForkBB\Core\EventListener;
+use ForkBB\Core\Event;
+
+class PageListener extends EventListener
+{
+    protected array $eventList = [
+        'Models\\Page:prepare:after' => 'onPagePrepare',
+        'bootstrap:start' => 'onBootstrap',
+    ];
+
+    protected function onPagePrepare(Event $event): bool
+    {
+        // Access the page object
+        $page = $event->page;
+        
+        // Modify page data
+        $page->customData = 'Hello, World!';
+        
+        return true;
+    }
+
+    protected function onBootstrap(Event $event): bool
+    {
+        // Add custom controller
+        $event->controllers[] = 'MyCustomController';
+        
+        return true;
+    }
+}
+```
+
+The `$eventList` property maps event names to method names in your listener.
+
+## Registering Listeners
+
+Register listeners in your extension's `composer.json`:
+
+```json
+{
+  "extra": {
+    "events": [
+      {
+        "name": "Models\\Page:prepare:after",
+        "priority": 100,
+        "listener": "MyCompany\\HelloWorld\\Listeners\\PageListener"
+      },
+      {
+        "name": "bootstrap:start",
+        "priority": 200,
+        "listener": "MyCompany\\HelloWorld\\Listeners\\PageListener"
+      }
+    ]
+  }
+}
+```
+
+Listeners with higher priority values are called first. Multiple listeners can respond to the same event.
+
+## Available Events
+
+ForkBB dispatches events at various points in the application lifecycle:
+
+### bootstrap:start
+
+Dispatched at the very beginning of the bootstrap process, before routing:
+
+```php
+$event = new Event('bootstrap:start');
+$event->controllers = ['Primary', 'Routing'];
+
+$c->dispatcher->dispatch($event);
+```
+
+**Use cases:**
+- Adding custom controllers
+- Early initialization
+- Request preprocessing
+
+### Models\Page:prepare:after
+
+Dispatched after a page model is prepared but before rendering:
+
+```php
+$event = new Event('Models\\Page:prepare:after');
+$event->page = $this;
+
+$this->c->dispatcher->dispatch($event);
+```
+
+**Use cases:**
+- Modifying page data
+- Adding navigation items
+- Injecting custom variables
+
+### Models\Pages\Admin:prepare:after
+
+Dispatched after admin page preparation:
+
+```php
+$event = new Event('Models\\Pages\\Admin:prepare:after');
+$event->page = $this;
+
+$this->c->dispatcher->dispatch($event);
+```
+
+**Use cases:**
+- Adding admin menu items
+- Customizing admin interface
+- Admin-specific modifications
+
+## Event Propagation
+
+Listeners can stop event propagation to prevent subsequent listeners from running:
+
+```php
+protected function onMyEvent(Event $event): bool
+{
+    // Process event
+    if ($someCondition) {
+        $event->stopPropagation();
+    }
+    
+    return true;
+}
+```
+
+Once `stopPropagation()` is called, no further listeners will be executed for this event.
+
+## Event Priority
+
+Priority determines the order listeners are called. Higher values run first:
+
+```json
+{
+  "events": [
+    {
+      "name": "bootstrap:start",
+      "priority": 200,
+      "listener": "Extension1\\Listener"
+    },
+    {
+      "name": "bootstrap:start",
+      "priority": 100,
+      "listener": "Extension2\\Listener"
+    }
+  ]
+}
+```
+
+In this example, `Extension1\Listener` runs before `Extension2\Listener`.
+
+From the Extensions manager:
+
+```php
+// Sort events by priority (descending)
+uasort($events, function (array $a, array $b) {
+    return $b['priority'] <=> $a['priority'];
+});
+```
+
+## Event Configuration
+
+When extensions are enabled, event mappings are compiled into `app/config/ext/events.php`:
+
+```php
+return [
+    'bootstrap:start' => [
+        'Extension1\\Listeners\\BootstrapListener',
+        'Extension2\\Listeners\\BootstrapListener',
+    ],
+    'Models\\Page:prepare:after' => [
+        'Extension1\\Listeners\\PageListener',
+    ],
+];
+```
+
+This file is automatically generated and should not be edited manually.
+
+## Example: Adding Custom Navigation
+
+Here's a complete example of using events to add a custom navigation item:
+
+<CodeGroup>
+```php Listener Class
+<?php
+namespace MyCompany\HelloWorld\Listeners;
+
+use ForkBB\Core\EventListener;
+use ForkBB\Core\Event;
+
+class NavigationListener extends EventListener
+{
+    protected array $eventList = [
+        'Models\\Page:prepare:after' => 'addNavigation',
+    ];
+
+    protected function addNavigation(Event $event): bool
+    {
+        $page = $event->page;
+        
+        // Add item to main navigation
+        $page->navMenu[] = [
+            'id'     => 'hello',
+            'title'  => 'Hello World',
+            'url'    => '/hello',
+            'active' => false,
+        ];
+        
+        return true;
+    }
+}
+```
+
+```json composer.json
+{
+  "name": "mycompany/hello-world",
+  "type": "forkbb-extension",
+  "description": "Adds hello world navigation",
+  "version": "1.0.0",
+  "extra": {
+    "display-name": "Hello World",
+    "autoload": [
+      {
+        "prefix": "MyCompany\\HelloWorld\\",
+        "path": "src"
+      }
+    ],
+    "events": [
+      {
+        "name": "Models\\Page:prepare:after",
+        "priority": 100,
+        "listener": "MyCompany\\HelloWorld\\Listeners\\NavigationListener"
+      }
+    ]
+  }
+}
+```
+</CodeGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Return boolean from listener methods">
+    Always return `true` on success or `false` on failure. This maintains consistency with the event system.
+  </Accordion>
+
+  <Accordion title="Don't modify core events">
+    Never modify the event object's core properties unless documented. Add your own custom properties instead.
+  </Accordion>
+
+  <Accordion title="Use appropriate priority values">
+    Use priority values between 0-1000. Reserve very high values (900+) for critical early initialization.
+  </Accordion>
+
+  <Accordion title="Handle missing data gracefully">
+    Always check if event properties exist before accessing them, as other extensions may modify event data.
+  </Accordion>
+
+  <Accordion title="Document your events">
+    If your extension dispatches custom events, document them for other developers to use.
+  </Accordion>
+</AccordionGroup>
+
+## Debugging Events
+
+To debug event flow:
+
+1. Check `app/config/ext/events.php` to see registered listeners
+2. Add logging in your listener methods
+3. Use `var_dump($event)` to inspect event data
+4. Check extension is enabled in admin panel
+
+## Next Steps
+
+<Card title="Creating Extensions" icon="hammer" href="/extensions/creating">
+  Learn more about creating complete extensions
+</Card>

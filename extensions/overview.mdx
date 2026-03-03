@@ -1,0 +1,124 @@
+---
+title: Extension System Overview
+description: Learn about ForkBB's powerful extension system that allows you to customize and extend forum functionality
+---
+
+## What are Extensions?
+
+ForkBB features a flexible extension system that allows you to customize and extend your forum without modifying the core codebase. Extensions can add new features, modify existing behavior, hook into events, and integrate with templates.
+
+## Extension Directory Structure
+
+Extensions are stored in the `ext/` directory at the root of your ForkBB installation:
+
+```
+forkbb/
+├── ext/
+│   └── vendor-name/
+│       └── extension-name/
+│           ├── composer.json
+│           ├── Actions.php
+│           ├── Listeners/
+│           │   └── ExampleListener.php
+│           └── public/
+│               ├── css/
+│               └── js/
+├── app/
+└── public/
+```
+
+## How Extensions Work
+
+Extensions are managed through the `Extensions` model, which:
+
+1. **Scans** the `ext/` directory for `composer.json` files
+2. **Validates** extension metadata and configuration
+3. **Manages** installation, enabling, disabling, and updates
+4. **Generates** configuration files in `app/config/ext/`
+
+## Extension States
+
+Extensions can be in one of several states:
+
+| State | Code | Description |
+|-------|------|-------------|
+| `NOT_INSTALLED` | 0 | Extension is present but not installed |
+| `DISABLED` | 4 | Extension is installed but disabled |
+| `DISABLED_DOWN` | 5 | Extension is disabled and file version is older |
+| `DISABLED_UP` | 6 | Extension is disabled and file version is newer |
+| `ENABLED` | 8 | Extension is active and running |
+| `ENABLED_DOWN` | 9 | Extension is enabled but file version is older |
+| `ENABLED_UP` | 10 | Extension is enabled but file version is newer |
+| `CRASH` | 12 | Extension files are missing or corrupted |
+
+These states are defined in the `Extension` model:
+
+```php
+class Extension extends Model
+{
+    const NOT_INSTALLED = 0;
+    const DISABLED      = 4;
+    const DISABLED_DOWN = 5;
+    const DISABLED_UP   = 6;
+    const ENABLED       = 8;
+    const ENABLED_DOWN  = 9;
+    const ENABLED_UP    = 10;
+    const CRASH         = 12;
+}
+```
+
+## Configuration Files
+
+When extensions are enabled, ForkBB generates several configuration files in `app/config/ext/`:
+
+- **`common.php`** - Combined data from all extensions
+- **`pre.php`** - Template pre-processing data
+- **`auto.php`** - PSR-4 autoloader mappings
+- **`config.php`** - Extension configuration values
+- **`events.php`** - Event listener mappings
+
+## Extension Capabilities
+
+Extensions can:
+
+- **Listen to events** to hook into application lifecycle
+- **Modify templates** by injecting content before rendering
+- **Add routes** and controllers for new pages
+- **Create symlinks** to serve static assets from `public/`
+- **Register autoloaders** for custom PHP classes
+- **Add configuration** values to the forum
+- **Run installation hooks** for setup and teardown
+
+## Extension Management
+
+The `Extensions` manager provides methods to control extension lifecycle:
+
+```php
+// Install an extension
+$this->c->Extensions->install($extension);
+
+// Enable an extension
+$this->c->Extensions->enable($extension);
+
+// Disable an extension
+$this->c->Extensions->disable($extension);
+
+// Update an extension
+$this->c->Extensions->update($extension);
+
+// Uninstall an extension
+$this->c->Extensions->uninstall($extension);
+```
+
+Each method validates the current state and performs the necessary operations to transition the extension to the new state.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Extensions" icon="hammer" href="/extensions/creating">
+    Learn how to create your own extension
+  </Card>
+  <Card title="Event System" icon="bolt" href="/extensions/events">
+    Understand how to use events in extensions
+  </Card>
+</CardGroup>

@@ -1,0 +1,240 @@
+---
+title: Admin Panel Overview
+description: Navigate and use the ForkBB administration panel
+icon: shield-halved
+---
+
+The ForkBB admin panel provides comprehensive tools for managing your forum. Access is restricted to administrators and moderators based on their permissions.
+
+## Accessing the Admin Panel
+
+Administrators can access the admin panel through:
+
+<Steps>
+  <Step title="Navigate to Admin">
+    Click the "Admin" link in the navigation menu (visible only to users with admin privileges)
+  </Step>
+  <Step title="Verify Permissions">
+    Your access level determines which admin sections you can view and modify
+  </Step>
+</Steps>
+
+<Note>
+The admin panel URL follows the pattern `/admin` and requires authentication. The system checks `$this->user->isAdmin` to verify admin access.
+</Note>
+
+## Admin Panel Structure
+
+The admin panel is organized into logical sections accessible through the navigation menu:
+
+### Core Sections
+
+<CardGroup cols={2}>
+  <Card title="Index" icon="house">
+    Dashboard showing forum statistics and version information
+    - Current ForkBB revision
+    - Quick access to statistics
+  </Card>
+  
+  <Card title="Users" icon="users">
+    User search, management, and moderation tools
+    - Search users by various criteria
+    - Edit user profiles
+    - Ban and delete users
+  </Card>
+  
+  <Card title="Bans" icon="ban">
+    Manage banned users and IP addresses
+    - Requires `banUsers` permission
+  </Card>
+  
+  <Card title="Reports" icon="flag">
+    View and handle user reports
+    - Available to admins and moderators based on report settings
+  </Card>
+</CardGroup>
+
+### Administrator-Only Sections
+
+These sections require full administrator privileges (`$this->user->isAdmin`):
+
+<AccordionGroup>
+  <Accordion title="Options" icon="gear">
+    Global forum configuration and settings
+  </Accordion>
+  
+  <Accordion title="Parser Settings" icon="code">
+    BBCode parser configuration and smilies management
+  </Accordion>
+  
+  <Accordion title="Categories" icon="folder-tree">
+    Create and organize forum categories
+  </Accordion>
+  
+  <Accordion title="Forums" icon="comments">
+    Forum creation, editing, and permission management
+  </Accordion>
+  
+  <Accordion title="User Groups" icon="user-group">
+    Group creation and permission configuration
+  </Accordion>
+  
+  <Accordion title="Censoring" icon="eye-slash">
+    Word censoring and content filtering
+  </Accordion>
+  
+  <Accordion title="Uploads" icon="upload">
+    File upload management and settings
+  </Accordion>
+  
+  <Accordion title="Antispam" icon="shield">
+    Anti-spam configuration and tools
+  </Accordion>
+  
+  <Accordion title="Logs" icon="file-lines">
+    View system logs and activity
+  </Accordion>
+  
+  <Accordion title="Extensions" icon="puzzle-piece">
+    Manage forum extensions and plugins
+  </Accordion>
+  
+  <Accordion title="Maintenance" icon="wrench">
+    Maintenance mode and database tools
+  </Accordion>
+</AccordionGroup>
+
+## Navigation Implementation
+
+The admin navigation is dynamically generated based on user permissions:
+
+```php Admin.php:57
+protected function aNavigation(): array
+{
+    $r   = $this->c->Router;
+    $nav = [
+        'index' => [$r->link('Admin'), 'Admin index'],
+        'users' => [$r->link('AdminUsers'), 'Users'],
+    ];
+
+    if ($this->userRules->banUsers) {
+        $nav['bans'] = [$r->link('AdminBans'), 'Bans'];
+    }
+    
+    if ($this->user->isAdmin) {
+        $nav += [
+            'options'     => [$r->link('AdminOptions'), 'Admin options'],
+            'parser'      => [$r->link('AdminParser'), 'Parser settings'],
+            'categories'  => [$r->link('AdminCategories'), 'Categories'],
+            'forums'      => [$r->link('AdminForums'), 'Forums'],
+            'groups'      => [$r->link('AdminGroups'), 'User groups'],
+            // ... additional sections
+        ];
+    }
+    
+    return $nav;
+}
+```
+
+## Security Features
+
+<Warning>
+All admin pages implement security measures:
+- CSRF token verification on form submissions
+- Permission checks before displaying content
+- Secure headers (noindex, nofollow robots meta)
+- HTTP Strict Transport Security (HSTS) set to 'secure' level
+</Warning>
+
+### CSRF Protection
+
+Every admin form includes CSRF tokens:
+
+```php
+'hidden' => [
+    'token' => $this->c->Csrf->create('AdminForums'),
+],
+```
+
+Tokens are verified on submission:
+
+```php
+'token' => 'token:AdminForums',
+```
+
+## Page Styling
+
+Admin pages use a dedicated stylesheet loaded in the page header:
+
+```php Admin.php:36
+$this->pageHeader('adminStyle', 'link', 9000, [
+    'rel'  => 'stylesheet',
+    'type' => 'text/css',
+    'href' => $this->publicLink("/style/{$this->user->style}/admin.css"),
+]);
+```
+
+## Breadcrumb Navigation
+
+The admin panel provides breadcrumb navigation for easy page hierarchy understanding:
+
+```php Admin.php:104
+protected function crumbs(mixed ...$crumbs): array
+{
+    if ('index' !== $this->aIndex) {
+        if (isset($this->aNavigation[$this->aIndex])) {
+            $crumbs[] = $this->aNavigation[$this->aIndex];
+        }
+    }
+    
+    $crumbs[] = [$this->c->Router->link('Admin'), 'Admin title', null, 'admin'];
+    $result   = parent::crumbs(...$crumbs);
+    
+    $this->adminHeader = \end($result)[1];
+    
+    return $result;
+}
+```
+
+## Common Properties
+
+All admin pages inherit these properties:
+
+- `$this->identifier = 'admin'` - Page identifier
+- `$this->aIndex` - Active navigation item indicator
+- `$this->fIndex = self::FI_ADMIN` - Forum index type
+- `$this->onlinePos = 'admin'` - Online position tracking
+- `$this->robots = 'noindex, nofollow'` - Search engine directives
+- `$this->hhsLevel = 'secure'` - HSTS level
+
+## Extending the Admin Panel
+
+Extensions can add custom admin sections using the event system:
+
+```php
+$event      = new Event('Pages\\Admin:aNavigation:after');
+$event->nav = $nav;
+
+$this->c->dispatcher->dispatch($event);
+```
+
+<Tip>
+When creating custom admin pages, extend the `ForkBB\Models\Pages\Admin` base class to inherit all security features and styling.
+</Tip>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/admin/user-management">
+    Learn how to manage forum users
+  </Card>
+  <Card title="Forum Management" icon="comments" href="/admin/forum-management">
+    Configure forums and categories
+  </Card>
+  <Card title="Permissions" icon="key" href="/admin/permissions">
+    Understand the permission system
+  </Card>
+  <Card title="Security" icon="lock" href="/security/overview">
+    Review security best practices
+  </Card>
+</CardGroup>

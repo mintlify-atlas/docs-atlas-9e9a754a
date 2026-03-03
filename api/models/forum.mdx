@@ -1,0 +1,320 @@
+---
+title: Forum Model
+description: Forum model API reference for ForkBB forum software
+---
+
+The `Forum` model represents a forum section in ForkBB. It extends `DataModel` and provides properties and methods for managing forums, subforums, moderators, and forum-specific permissions.
+
+## Location
+
+`app/Models/Forum/Forum.php`
+
+## Properties
+
+<ParamField path="id" type="int">
+  Unique forum identifier
+</ParamField>
+
+<ParamField path="forum_name" type="string">
+  Forum display name
+</ParamField>
+
+<ParamField path="parent_forum_id" type="int|null">
+  Parent forum ID (null for top-level forums)
+</ParamField>
+
+<ParamField path="num_topics" type="int">
+  Total number of topics in the forum
+</ParamField>
+
+<ParamField path="num_posts" type="int">
+  Total number of posts in the forum
+</ParamField>
+
+<ParamField path="last_post" type="int">
+  Timestamp of the last post
+</ParamField>
+
+<ParamField path="last_post_id" type="int">
+  ID of the last post
+</ParamField>
+
+<ParamField path="last_poster" type="string">
+  Username of the last poster
+</ParamField>
+
+<ParamField path="last_topic" type="string">
+  Title of the last topic with activity
+</ParamField>
+
+<ParamField path="post_topics" type="int|null">
+  Permission to create topics (1=allowed, null=use group default)
+</ParamField>
+
+<ParamField path="post_replies" type="int|null">
+  Permission to reply to topics (1=allowed, null=use group default)
+</ParamField>
+
+<ParamField path="redirect_url" type="string|null">
+  Redirect URL if forum is a redirect link
+</ParamField>
+
+<ParamField path="sort_by" type="int">
+  Topic sorting method (0=last post desc, 1=posted desc, 2=subject, etc.)
+</ParamField>
+
+<ParamField path="page" type="int">
+  Current page number
+</ParamField>
+
+## Computed Properties
+
+<ResponseField name="parent" type="Forum|null">
+  Parent forum object. Returns `null` for root forum (id=0).
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Forum name (alias for `forum_name`)
+</ResponseField>
+
+<ResponseField name="friendly" type="string">
+  URL-friendly forum name for links
+</ResponseField>
+
+<ResponseField name="subforums" type="array">
+  Array of direct subforum objects indexed by forum ID
+</ResponseField>
+
+<ResponseField name="descendants" type="array">
+  Array of all descendant forums (including nested subforums)
+</ResponseField>
+
+<ResponseField name="moderators" type="array">
+  Array of moderator data with name and link for each moderator
+</ResponseField>
+
+<ResponseField name="tree" type="Forum">
+  Aggregated statistics for this forum and all descendants
+</ResponseField>
+
+<ResponseField name="numPages" type="int">
+  Total number of pages based on topic count and user display settings
+</ResponseField>
+
+<ResponseField name="pagination" type="array">
+  Pagination array for forum pages
+</ResponseField>
+
+## Permission Properties
+
+<ResponseField name="canCreateTopic" type="bool">
+  Returns `true` if current user can create topics in this forum
+</ResponseField>
+
+<ResponseField name="canMarkRead" type="bool">
+  Returns `true` if current user can mark all topics as read
+</ResponseField>
+
+<ResponseField name="canSubscription" type="bool">
+  Returns `true` if current user can subscribe to forum updates
+</ResponseField>
+
+## Link Properties
+
+<ResponseField name="link" type="string">
+  URL to the forum page
+</ResponseField>
+
+<ResponseField name="linkNew" type="string">
+  URL to search for new posts in this forum
+</ResponseField>
+
+<ResponseField name="linkLast" type="string">
+  URL to the last post in the forum
+</ResponseField>
+
+<ResponseField name="linkCreateTopic" type="string">
+  URL to create a new topic
+</ResponseField>
+
+<ResponseField name="linkMarkRead" type="string">
+  URL to mark all topics as read
+</ResponseField>
+
+<ResponseField name="linkSubscribe" type="string">
+  URL to subscribe to forum updates
+</ResponseField>
+
+<ResponseField name="linkUnsubscribe" type="string">
+  URL to unsubscribe from forum updates
+</ResponseField>
+
+## Methods
+
+### modAdd()
+
+Adds one or more users as moderators to the forum.
+
+```php
+public function modAdd(User ...$users): void
+```
+
+<ParamField path="users" type="User...">
+  Variable number of User objects to add as moderators
+</ParamField>
+
+**Example:**
+```php
+$forum = $container->forums->get(5);
+$user1 = $container->users->load(123);
+$user2 = $container->users->load(456);
+
+$forum->modAdd($user1, $user2);
+// Save changes
+$container->forums->update($forum);
+```
+
+### modDelete()
+
+Removes one or more users from the forum's moderator list.
+
+```php
+public function modDelete(User ...$users): void
+```
+
+<ParamField path="users" type="User...">
+  Variable number of User objects to remove as moderators
+</ParamField>
+
+**Example:**
+```php
+$forum = $container->forums->get(5);
+$user = $container->users->load(123);
+
+$forum->modDelete($user);
+$container->forums->update($forum);
+```
+
+### hasPage()
+
+Checks if the current page number is valid for this forum.
+
+```php
+public function hasPage(): bool
+```
+
+**Returns:** `bool` - `true` if page is valid
+
+**Example:**
+```php
+$forum = $container->forums->get(5);
+$forum->page = 3;
+
+if ($forum->hasPage()) {
+    $topics = $forum->pageData();
+} else {
+    // Invalid page number
+}
+```
+
+### pageData()
+
+Returns an array of topics for the current page.
+
+```php
+public function pageData(): array
+```
+
+**Returns:** Array of topic objects
+
+**Throws:** `InvalidArgumentException` if page number is invalid
+
+**Example:**
+```php
+$forum = $container->forums->get(5);
+$forum->page = 1;
+
+$topics = $forum->pageData();
+foreach ($topics as $topic) {
+    echo "{$topic->name}\n";
+}
+```
+
+### calcPage()
+
+Calculates which page a specific topic is on within the forum.
+
+```php
+public function calcPage(int $tid): void
+```
+
+<ParamField path="tid" type="int">
+  Topic ID to find
+</ParamField>
+
+**Example:**
+```php
+$forum = $container->forums->get(5);
+$forum->calcPage(789); // Calculate page for topic 789
+
+if ($forum->page !== null) {
+    echo "Topic is on page {$forum->page}";
+}
+```
+
+## Usage Example
+
+```php
+// Load a forum
+$forum = $container->forums->get(10);
+
+// Display forum info
+echo "<h2>{$forum->name}</h2>";
+echo "<p>Topics: {$forum->num_topics}, Posts: {$forum->num_posts}</p>";
+
+// Check permissions
+if ($forum->canCreateTopic) {
+    echo "<a href=\"{$forum->linkCreateTopic}\">New Topic</a>";
+}
+
+// Display subforums
+foreach ($forum->subforums as $subforum) {
+    echo "<a href=\"{$subforum->link}\">{$subforum->name}</a><br>";
+}
+
+// Get topics for page 1
+$forum->page = 1;
+if ($forum->hasPage()) {
+    $topics = $forum->pageData();
+    foreach ($topics as $topic) {
+        echo "<div>{$topic->name}</div>";
+    }
+}
+
+// Display moderators
+if (!empty($forum->moderators)) {
+    echo "Moderators: ";
+    foreach ($forum->moderators as $mod) {
+        if ($mod['link']) {
+            echo "<a href=\"{$mod['link']}\">{$mod['name']}</a> ";
+        } else {
+            echo "{$mod['name']} ";
+        }
+    }
+}
+
+// Get tree statistics (including descendants)
+$stats = $forum->tree;
+echo "Total posts (including subforums): {$stats->num_posts}";
+```
+
+## Sorting Options
+
+The `sort_by` property controls topic sorting:
+
+- `0` - Last post DESC (default)
+- `1` - Posted DESC
+- `2` - Subject ASC
+- `4` - Last post ASC
+- `5` - Posted ASC
+- `6` - Subject DESC

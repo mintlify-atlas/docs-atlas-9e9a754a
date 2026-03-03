@@ -1,0 +1,413 @@
+---
+title: Container
+description: Dependency injection container for service management
+---
+
+The `Container` class is ForkBB's dependency injection container, providing service resolution, shared instances, and parameter management.
+
+## Overview
+
+Based on [artoodetoo/container](https://github.com/artoodetoo/container), the Container manages:
+- **Shared services** - Singleton instances created once
+- **Multiple services** - New instances created on each access
+- **Parameters** - Configuration values and data
+- **Factory methods** - Services created via factory patterns
+
+<Note>
+The Container is available throughout ForkBB via constructor injection, typically as `$c` or `$this->c`.
+</Note>
+
+## Constructor
+
+```php
+public function __construct(array $config = [])
+```
+
+<ParamField path="config" type="array" default="[]">
+  Container configuration with optional keys:
+  - `shared` - Array of shared service definitions
+  - `multiple` - Array of multiple instance service definitions
+  - Other keys become instance parameters
+</ParamField>
+
+**Example:**
+
+```php
+$container = new Container([
+    'shared' => [
+        'db' => [DB::class, $dsn, $username, $password],
+        'router' => [Router::class, '%base.url%', '@csrf']
+    ],
+    'multiple' => [
+        'validator' => Validator::class
+    ],
+    'base.url' => 'https://example.com',
+    'debug' => true
+]);
+```
+
+## Service Resolution
+
+### __get
+
+```php
+public function __get(string $key): mixed
+```
+
+Retrieves a service or parameter from the container.
+
+<ParamField path="key" type="string" required>
+  Service name or parameter path. Supports dot notation for nested values (e.g., `config.base.url`).
+</ParamField>
+
+<ResponseField name="return" type="mixed">
+  The resolved service instance or parameter value.
+</ResponseField>
+
+**Service Resolution Rules:**
+
+1. **Existing instances** - Returns cached value immediately
+2. **Dot notation** - Traverses arrays/objects (e.g., `config.db.host`)
+3. **Shared services** - Creates and caches singleton
+4. **Multiple services** - Creates new instance each time
+5. **Parameter substitution** - Resolves `%param%` pattern (e.g., `%base.url%`)
+
+**Examples:**
+
+```php
+// Access shared service (singleton)
+$db = $this->c->DB;
+$router = $this->c->Router;
+
+// Access nested configuration
+$dbHost = $this->c->{'config.db.host'};
+$debugMode = $this->c->{'config.debug'};
+
+// Create new validator instance
+$validator = $this->c->Validator;
+```
+
+**Factory Method Pattern:**
+
+```php
+// Service definition using factory
+'shared' => [
+    'cache' => '@factory:createCache'
+]
+
+// Factory class
+class Factory {
+    public function createCache($container) {
+        return new Cache($container->config);
+    }
+}
+
+// Usage
+$cache = $this->c->cache;
+```
+
+### __set
+
+```php
+public function __set(string $key, mixed $service): void
+```
+
+Sets a service or parameter value.
+
+<ParamField path="key" type="string" required>
+  Service name. Cannot contain dots.
+</ParamField>
+
+<ParamField path="service" type="mixed" required>
+  The service instance or parameter value to store.
+</ParamField>
+
+**Example:**
+
+```php
+// Store a service instance
+$this->c->myService = new MyService();
+
+// Store a parameter
+$this->c->apiKey = 'secret-key-123';
+```
+
+## Configuration
+
+### config
+
+```php
+public function config(array $config): void
+```
+
+Merges additional configuration into the container.
+
+<ParamField path="config" type="array" required>
+  Configuration array with same structure as constructor.
+</ParamField>
+
+**Example:**
+
+```php
+$this->c->config([
+    'shared' => [
+        'mailer' => [Mailer::class, '%smtp.host%']
+    ],
+    'smtp.host' => 'smtp.example.com'
+]);
+```
+
+### setParameter
+
+```php
+public function setParameter(string $name, mixed $value): Container
+```
+
+Sets a nested parameter using dot notation.
+
+<ParamField path="name" type="string" required>
+  Parameter path with dot notation (e.g., `db.host`).
+</ParamField>
+
+<ParamField path="value" type="mixed" required>
+  The parameter value.
+</ParamField>
+
+<ResponseField name="return" type="Container">
+  Returns self for method chaining.
+</ResponseField>
+
+**Example:**
+
+```php
+$this->c
+    ->setParameter('db.host', 'localhost')
+    ->setParameter('db.port', 3306)
+    ->setParameter('db.charset', 'utf8mb4');
+
+// Access parameters
+$host = $this->c->{'db.host'}; // 'localhost'
+```
+
+## Utility Methods
+
+### fromArray
+
+```php
+public function fromArray(array $array, array $tree): mixed
+```
+
+Retrieves a value from a nested array.
+
+<ParamField path="array" type="array" required>
+  The source array.
+</ParamField>
+
+<ParamField path="tree" type="array" required>
+  Array of keys representing the path.
+</ParamField>
+
+<ResponseField name="return" type="mixed">
+  The value at the path, or null if not found.
+</ResponseField>
+
+**Example:**
+
+```php
+$data = [
+    'user' => [
+        'profile' => [
+            'name' => 'John Doe'
+        ]
+    ]
+];
+
+$name = $this->c->fromArray($data, ['user', 'profile', 'name']);
+// Returns: 'John Doe'
+```
+
+### isInit
+
+```php
+public function isInit(string $name): bool
+```
+
+Checks if a service has been initialized.
+
+<ParamField path="name" type="string" required>
+  Service name.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  True if the service instance exists in cache.
+</ResponseField>
+
+**Example:**
+
+```php
+if ($this->c->isInit('DB')) {
+    // Database connection already established
+    $queries = $this->c->DB->getQueries();
+}
+```
+
+## Parameter Substitution
+
+The Container supports automatic parameter substitution:
+
+### Full Substitution
+
+Replaces entire string and returns any type:
+
+```php
+'shared' => [
+    'router' => [Router::class, '%base.url%'] // Returns actual value type
+]
+```
+
+### Partial Substitution
+
+Replaces within string, always returns string:
+
+```php
+'dsn' => 'mysql:host=%db.host%;dbname=%db.name%'
+// Result: 'mysql:host=localhost;dbname=forkbb'
+```
+
+### Service Reference
+
+References another service using `@` prefix:
+
+```php
+'shared' => [
+    'validator' => [Validator::class, '@secury', '@db']
+]
+
+// Access nested service properties
+'config.version' => '@app.version'
+```
+
+## Real-World Examples
+
+### Accessing Core Services
+
+```php ~/workspace/source/app/Controllers/Routing.php
+class Routing
+{
+    public function __construct(protected Container $c)
+    {
+    }
+
+    public function routing(): Page
+    {
+        // Access shared services
+        $user = $this->c->user;
+        $config = $this->c->config;
+        $router = $this->c->Router;
+
+        // Use services
+        $router->add(
+            $router::GET,
+            '/forum/{id|i:[1-9]\d*}/{name}',
+            'Forum:view',
+            'Forum'
+        );
+
+        return $page;
+    }
+}
+```
+
+### Service Configuration
+
+```php
+// Define services
+$container->config([
+    'shared' => [
+        'db' => [
+            DB::class,
+            'dsn' => '%db.dsn%',
+            'username' => '%db.user%',
+            'password' => '%db.pass%',
+            'prefix' => '%db.prefix%'
+        ],
+        'router' => [Router::class, '%base.url%', '@csrf'],
+        'validator' => [Validator::class, '@container']
+    ],
+    'db.dsn' => 'mysql:host=localhost;dbname=forkbb',
+    'db.user' => 'root',
+    'db.pass' => 'secret',
+    'db.prefix' => 'fork_',
+    'base.url' => 'https://example.com/forum'
+]);
+```
+
+### Creating Multiple Instances
+
+```php
+// Each access creates a new instance
+$container->config([
+    'multiple' => [
+        'validator' => Validator::class
+    ]
+]);
+
+$validator1 = $this->c->Validator; // New instance
+$validator2 = $this->c->Validator; // Another new instance
+```
+
+## Error Handling
+
+<Warning>
+The Container throws `InvalidArgumentException` for:
+- Accessing undefined services
+- Using dots in `__set()` keys
+- Setting parameters on scalar values in path
+</Warning>
+
+**Example:**
+
+```php
+try {
+    $service = $this->c->nonExistentService;
+} catch (InvalidArgumentException $e) {
+    // Handle: "Wrong property name: nonExistentService"
+}
+```
+
+## Best Practices
+
+<Card title="Use Type Hints" icon="code">
+  ```php
+  public function __construct(protected Container $c)
+  ```
+  Always inject the Container via constructor with type hints.
+</Card>
+
+<Card title="Prefer Shared Services" icon="share-nodes">
+  Use `shared` for services that maintain state or are expensive to create (database, router, etc.).
+</Card>
+
+<Card title="Check Initialization" icon="check">
+  ```php
+  if ($this->c->isInit('DB')) {
+      // Use existing connection
+  }
+  ```
+  Check if expensive services are initialized before accessing.
+</Card>
+
+<Card title="Use Parameter Substitution" icon="percent">
+  ```php
+  '%base.url%/api' // Good
+  $container->{'base.url'} . '/api' // Works but verbose
+  ```
+  Leverage parameter substitution for cleaner configuration.
+</Card>
+
+## See Also
+
+- [Router](/api/router) - Routing service management
+- [Validator](/api/validator) - Validation service usage
+- [Database](/api/database) - Database service access
+- [Configuration](/configuration) - Application configuration

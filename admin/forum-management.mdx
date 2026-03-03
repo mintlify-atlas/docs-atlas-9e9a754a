@@ -1,0 +1,646 @@
+---
+title: Forum Management
+description: Create, edit, and organize forums and categories
+icon: comments
+---
+
+The forum management system allows administrators to create hierarchical forum structures, configure permissions, and manage custom fields.
+
+## Category Management
+
+Categories are top-level organizational containers for forums.
+
+### Viewing Categories
+
+The category management page displays all categories in a table format:
+
+```php Categories.php:23
+public function view(array $args, string $method): Page
+{
+    $this->c->Lang->load('validator');
+    $this->c->Lang->load('admin_categories');
+    
+    $list = $this->c->categories->repository;
+    
+    // Handle POST for updates...
+    
+    $this->nameTpl   = 'admin/form';
+    $this->aIndex    = 'categories';
+    $this->form      = $this->formEdit();
+    $this->classForm = ['editcategories', 'inline'];
+    $this->titleForm = 'Categories';
+    
+    return $this;
+}
+```
+
+### Category Properties
+
+<AccordionGroup>
+  <Accordion title="Name" icon="tag">
+    - Maximum 80 characters
+    - Required field
+    - Used in forum navigation
+    
+    ```php Categories.php:100
+    $fields["form[{$key}][cat_name]"] = [
+        'class'     => ['name', 'category'],
+        'type'      => 'text',
+        'maxlength' => '80',
+        'value'     => $row['cat_name'],
+        'caption'   => 'Category name label',
+        'required'  => true,
+    ];
+    ```
+  </Accordion>
+  
+  <Accordion title="Display Position" icon="arrows-up-down">
+    - Integer value (0 to 2,147,483,647)
+    - Controls display order
+    - Lower numbers appear first
+    
+    ```php Categories.php:108
+    $fields["form[{$key}][disp_position]"] = [
+        'class'   => ['position', 'category'],
+        'type'    => 'number',
+        'min'     => '0',
+        'max'     => '2147483647',
+        'value'   => $row['disp_position'],
+        'caption' => 'Category position label',
+    ];
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Adding Categories
+
+Create new categories inline on the category management page:
+
+```php Categories.php:136
+$form['sets']['new-cat'] = [
+    'fields' => [
+        'new' => [
+            'class'     => ['new'],
+            'type'      => 'text',
+            'maxlength' => '80',
+            'caption'   => 'Add category label',
+            'help'      => ['Add category help', $this->c->Router->link('AdminForums'), __('Forums')],
+        ],
+    ],
+];
+```
+
+On form submission:
+
+```php Categories.php:58
+if (\strlen($v->new) > 0) {
+    $this->c->categories->insert($v->new);
+}
+
+$this->c->forums->reset();
+
+return $this->c->Redirect->page('AdminCategories')
+    ->message('Categories updated redirect', FORK_MESS_SUCC);
+```
+
+### Deleting Categories
+
+<Warning>
+Deleting a category requires confirmation and may affect associated forums.
+</Warning>
+
+```php Categories.php:155
+public function delete(array $args, string $method): Page
+{
+    $category = $this->c->categories->get($args['id']);
+    
+    if (! $category) {
+        return $this->c->Message->message('Bad request');
+    }
+    
+    // Verify confirmation...
+    
+    $this->c->categories->delete($args['id']);
+    $this->c->forums->reset();
+    
+    return $this->c->Redirect->page('AdminCategories')
+        ->message('Category deleted redirect', FORK_MESS_SUCC);
+}
+```
+
+The deletion form requires explicit confirmation:
+
+```php Categories.php:214
+'confirm' => [
+    'caption' => 'Confirm delete',
+    'type'    => 'checkbox',
+    'label'   => ['I want to delete the category %s', $category['cat_name']],
+    'checked' => false,
+],
+```
+
+## Forum Management
+
+Forums are discussion containers within categories that support nested hierarchies.
+
+### Forum Structure
+
+<Steps>
+  <Step title="Category Level">
+    Top-level organizational unit
+  </Step>
+  <Step title="Forum Level">
+    Main discussion areas within categories
+  </Step>
+  <Step title="Subforum Level">
+    Nested forums within parent forums (unlimited depth)
+  </Step>
+</Steps>
+
+### Creating/Editing Forums
+
+```php Forums.php:335
+public function edit(array $args, string $method): Page
+{
+    $forum = empty($args['id']) 
+        ? $this->c->forums->create() 
+        : $this->c->forums->loadTree($args['id']);
+    
+    if (! $forum instanceof Forum) {
+        return $this->c->Message->message('Bad request');
+    }
+    
+    // Generate parent selection list
+    $this->calcList($forum);
+    
+    // Handle form submission...
+    
+    return $this;
+}
+```
+
+### Forum Properties
+
+<Tabs>
+  <Tab title="Basic Settings">
+    ```php Forums.php:472
+    'forum_name' => [
+        'type'      => 'text',
+        'maxlength' => '80',
+        'value'     => $forum->forum_name,
+        'caption'   => 'Forum name label',
+        'required'  => true,
+    ],
+    'friendly_name' => [
+        'type'      => 'text',
+        'maxlength' => '80',
+        'value'     => $forum->friendly_name,
+        'caption'   => 'Friendly name label',
+        'help'      => 'Friendly name help',
+    ],
+    'forum_desc' => [
+        'type'    => 'textarea',
+        'value'   => $forum->forum_desc,
+        'caption' => 'Forum description label',
+    ],
+    ```
+  </Tab>
+  
+  <Tab title="Parent & Organization">
+    ```php Forums.php:493
+    'parent' => [
+        'type'     => 'select',
+        'options'  => $this->listForOptions,
+        'value'    => $forum->parent_forum_id 
+            ? $forum->parent_forum_id 
+            : -$forum->cat_id,
+        'caption'  => 'Parent label',
+        'help'     => 'Parent help',
+        'required' => true,
+    ],
+    'sort_by' => [
+        'type'    => 'select',
+        'options' => [
+            0 => __('Last post option DESC'),
+            1 => __('Topic start option DESC'),
+            2 => __('Subject option ASC'),
+            4 => __('Last post option ASC'),
+            5 => __('Topic start option ASC'),
+            6 => __('Subject option DESC'),
+        ],
+        'value'   => $forum->sort_by,
+        'caption' => 'Sort by label',
+    ],
+    ```
+  </Tab>
+  
+  <Tab title="Special Features">
+    ```php Forums.php:514
+    'redirect_url' => [
+        'type'      => 'text',
+        'maxlength' => '255',
+        'value'     => $forum->redirect_url,
+        'caption'   => 'Redirect label',
+        'help'      => 'Redirect help',
+        'disabled'  => $forum->num_topics || $forum->subforums ? true : null,
+    ],
+    'premoderation' => [
+        'type'    => 'select',
+        'options' => [
+            -1 => __('No '),
+            0 => __('Default '),
+            1 => __('Replies '),
+            2 => __('New topics '),
+            3 => __('New topics and replies '),
+        ],
+        'value'   => $forum->premoderation,
+        'caption' => 'Pre-moderation label',
+    ],
+    'use_solution' => [
+        'type'    => 'radio',
+        'value'   => $forum->use_solution,
+        'values'  => [1 => __('Yes'), 0 => __('No')],
+        'caption' => 'Use solution label',
+        'help'    => 'Use solution help',
+    ],
+    ```
+  </Tab>
+  
+  <Tab title="Post Counting">
+    ```php Forums.php:534
+    'no_sum_mess' => [
+        'type'    => 'radio',
+        'value'   => $forum->no_sum_mess,
+        'values'  => [0 => __('Yes'), 1 => __('No')],
+        'caption' => 'Count messages label',
+        'help'    => [
+            'Count messages help', 
+            $this->c->Router->link('AdminUsers', ['#' => 'fork-recalc']), 
+            __('Users')
+        ],
+    ],
+    ```
+  </Tab>
+</Tabs>
+
+### Parent Selection
+
+The parent selection list is dynamically generated:
+
+```php Forums.php:24
+protected function calcList(Forum $forum): void
+{
+    $cid        = null;
+    $categories = $this->c->categories->repository;
+    $options    = [
+        ['', __('Not selected')],
+    ];
+    $idxs       = [];
+    $root = $this->c->forums->get(0);
+    
+    if ($root instanceof Forum) {
+        foreach ($this->c->forums->depthList($root, 0) as $f) {
+            if ($cid !== $f->cat_id) {
+                $cid       = $f->cat_id;
+                $options[] = [-$cid, __('Category prefix') . $f->cat_name];
+                $idxs[]    = -$cid;
+                unset($categories[$cid]);
+            }
+            
+            $indent = \str_repeat(__('Forum indent'), $f->depth);
+            
+            if (
+                $f->id === $forum->id
+                || isset($forum->descendants[$f->id])
+                || $f->redirect_url
+            ) {
+                $options[] = [$f->id, $indent . __('Forum prefix') . $f->forum_name, true];
+            } else {
+                $options[] = [$f->id, $indent . __('Forum prefix') . $f->forum_name];
+                $idxs[]    = $f->id;
+            }
+        }
+    }
+    
+    $this->listOfIndexes  = $idxs;
+    $this->listForOptions = $options;
+}
+```
+
+<Info>
+The system prevents circular references by disabling:
+- The forum itself as a parent
+- Any descendant forums as parents
+- Redirect forums as parents
+</Info>
+
+### Position Calculation
+
+```php Forums.php:71
+protected function forumPos(Forum $forum): int
+{
+    if (\is_int($forum->disp_position)) {
+        return $forum->disp_position;
+    }
+    
+    $root = $this->c->forums->get(0);
+    
+    if (! $root instanceof Forum) {
+        return 0;
+    }
+    
+    $max = 0;
+    
+    foreach ($root->descendants as $f) {
+        if ($f->disp_position > $max) {
+            $max = $f->disp_position;
+        }
+    }
+    
+    return $max + 1;
+}
+```
+
+### Saving Forums
+
+```php Forums.php:410
+if ($valid) {
+    if ($v->reset) {
+        $message = 'Perms reverted redirect';
+        $this->c->groups->Perm->reset($forum);
+    } else {
+        if (empty($args['id'])) {
+            $message = 'Forum added redirect';
+            $forum->disp_position = $this->forumPos($forum);
+            $forum->moderators    = '';
+            $this->c->forums->insert($forum);
+        } else {
+            $message = 'Forum updated redirect';
+            $this->c->forums->update($forum);
+        }
+        
+        $this->c->groups->Perm->update($forum, $v->perms);
+    }
+    
+    $this->c->forums->reset();
+    
+    return $this->c->Redirect->page('AdminForumsEdit', ['id' => $forum->id])
+        ->message($message, FORK_MESS_SUCC);
+}
+```
+
+### Deleting Forums
+
+<Warning>
+Forums with subforums cannot be deleted. Remove subforums first.
+</Warning>
+
+```php Forums.php:231
+public function delete(array $args, string $method): Page
+{
+    $forum = $this->c->forums->get($args['id']);
+    
+    if (
+        ! $forum instanceof Forum
+        || $forum->subforums
+    ) {
+        return $this->c->Message->message('Bad request');
+    }
+    
+    // Verify confirmation...
+    
+    $this->c->forums->delete($forum);
+    $this->c->forums->reset();
+    
+    return $this->c->Redirect->page('AdminForums')
+        ->message('Forum deleted redirect', FORK_MESS_SUCC);
+}
+```
+
+## Group Permissions
+
+<Note>
+Forum permissions are managed per-group and can override global group settings.
+</Note>
+
+Permission configuration is displayed on the forum edit page:
+
+```php Forums.php:583
+foreach ($this->c->groups->Perm->get($forum) as $id => $group) {
+    $fields = [];
+    $fields["perms[{$id}][read_forum]"] = [
+        'class'    => $group->def_read_forum ? $aOn : $aOff,
+        'type'     => 'checkbox',
+        'caption'  => 'Read forum label',
+        'label'    => '<span></span>',
+        'checked'  => $group->set_read_forum,
+        'disabled' => $group->dis_read_forum,
+    ];
+    $fields["perms[{$id}][post_replies]"] = [
+        'class'    => $group->def_post_replies ? $aOn : $aOff,
+        'type'     => 'checkbox',
+        'caption'  => 'Post replies label',
+        'label'    => '<span></span>',
+        'checked'  => $group->set_post_replies,
+        'disabled' => $group->dis_post_replies,
+    ];
+    $fields["perms[{$id}][post_topics]"] = [
+        'class'    => $group->def_post_topics ? $aOn : $aOff,
+        'type'     => 'checkbox',
+        'caption'  => 'Post topics label',
+        'label'    => '<span></span>',
+        'checked'  => $group->set_post_topics,
+        'disabled' => $group->dis_post_topics,
+    ];
+    
+    $form['sets']["perms{$id}"] = [
+        'class'  => ['permission'],
+        'legend' => $group->g_title,
+        'fields' => $fields,
+    ];
+}
+```
+
+### Permission Types
+
+<CardGroup cols={3}>
+  <Card title="Read Forum" icon="eye">
+    View forum and topics
+  </Card>
+  <Card title="Post Replies" icon="reply">
+    Reply to existing topics
+  </Card>
+  <Card title="Post Topics" icon="plus">
+    Create new topics
+  </Card>
+</CardGroup>
+
+### Reverting Permissions
+
+Reset forum permissions to default group settings:
+
+```php Forums.php:460
+$form['btns']['reset'] = [
+    'type'  => 'submit',
+    'value' => __('Revert to default'),
+    'class' => ['f-opacity'],
+];
+```
+
+## Custom Fields
+
+<Tip>
+Custom fields allow you to collect additional information when users create topics in a forum.
+</Tip>
+
+### Managing Custom Fields
+
+Access custom fields from the forum edit page:
+
+```php Forums.php:555
+if (
+    $forum->id > 0
+    && ! $forum->redirect_url
+) {
+    $form['sets']['forum']['fields'] += [
+        'use_custom_fields' => [
+            'type'    => 'radio',
+            'value'   => $forum->use_custom_fields,
+            'values'  => [1 => __('Yes'), 0 => __('No')],
+            'caption' => 'Use custom fields label',
+            'help'    => 'Use custom fields help',
+        ],
+        'custom_fields' => [
+            'type'    => 'link',
+            'value'   => __('Customize fields'),
+            'title'   => __('Customize fields'),
+            'href'    => $this->c->Router->link('AdminForumsFields', ['id' => $forum->id]),
+        ],
+    ];
+}
+```
+
+### Custom Field Properties
+
+<AccordionGroup>
+  <Accordion title="Name" icon="tag">
+    Display name for the field (max 256 characters)
+    
+    ```php Forums.php:881
+    'name' => [
+        'type'      => 'text',
+        'maxlength' => '255',
+        'value'     => $data['name'] ?? '',
+        'caption'   => 'Field name label',
+        'required'  => true,
+    ],
+    ```
+  </Accordion>
+  
+  <Accordion title="Required" icon="asterisk">
+    Whether users must fill this field
+    
+    ```php Forums.php:888
+    'required' => [
+        'type'    => 'radio',
+        'value'   => ($data['required'] ?? 1) ? 1 : 0,
+        'values'  => [1 => __('Yes'), 0 => __('No')],
+        'caption' => 'Field required label',
+    ],
+    ```
+  </Accordion>
+  
+  <Accordion title="Visibility" icon="eye">
+    Who can see the field value:
+    - All users
+    - Not guests
+    - Admins and moderators
+    - Admins only
+    
+    ```php Forums.php:894
+    'visibility' => [
+        'type'    => 'select',
+        'options' => [
+            1 => __('All'),
+            2 => __('Not guests'),
+            3 => __('Admins and mods'),
+            4 => __('Admins only'),
+        ],
+        'value'   => $data['visibility'] ?? 4,
+        'caption' => 'Visibility label',
+    ],
+    ```
+  </Accordion>
+  
+  <Accordion title="Max Length" icon="ruler">
+    Maximum character length (1-10,000)
+    
+    ```php Forums.php:905
+    'maxlength' => [
+        'type'    => 'number',
+        'min'     => '1',
+        'max'     => '10000',
+        'value'   => $data['maxlength'] ?? 256,
+        'caption' => 'Maximum length label',
+    ],
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Field Positioning
+
+Custom fields can be reordered:
+
+```php Forums.php:684
+if ($v->validation($_POST)) {
+    $positions = $v->pos;
+    
+    \asort($positions, \SORT_NUMERIC);
+    
+    $positions = \array_keys($positions);
+    $i         = 1;
+    $fields    = $forum->custom_fields;
+    $new       = [];
+    
+    foreach ($positions as $pos) {
+        if (empty($fields[$pos])) {
+            continue;
+        }
+        
+        $new[$i]      = $fields[$pos];
+        $fields[$pos] = null;
+        ++$i;
+    }
+    
+    $forum->custom_fields = $new;
+    $this->c->forums->update($forum);
+}
+```
+
+## Best Practices
+
+<Warning>
+**Important Considerations:**
+1. Plan your category structure before creating forums
+2. Use meaningful forum names and descriptions
+3. Test permissions before making forums public
+4. Limit custom field usage to essential information
+5. Regularly review and clean up unused forums
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Permissions" icon="key" href="/admin/permissions">
+    Configure detailed permission settings
+  </Card>
+  <Card title="User Groups" icon="user-group" href="/admin/user-management">
+    Manage user groups and assignments
+  </Card>
+  <Card title="Forum Model" icon="code" href="/models/forum">
+    Learn about the Forum model API
+  </Card>
+  <Card title="Categories" icon="folder-tree" href="/models/category">
+    Understand category management
+  </Card>
+</CardGroup>

@@ -1,0 +1,601 @@
+---
+title: Router
+description: URL routing, route registration, and link generation
+---
+
+The `Router` class handles all URL routing in ForkBB, including route registration, request matching, and link generation with automatic token management.
+
+## Overview
+
+The Router provides:
+- **Route Registration** - Define URL patterns with parameters
+- **Request Routing** - Match incoming requests to handlers
+- **Link Generation** - Create URLs from route markers
+- **URL Validation** - Verify URLs belong to the forum
+- **CSRF Protection** - Automatic token injection
+
+<Note>
+Access the router via the Container: `$this->c->Router`
+</Note>
+
+## HTTP Methods
+
+```php
+const GET = 'GET';        // GET requests only
+const PST = 'POST';       // POST requests only
+const DUO = ['GET', 'POST']; // Both GET and POST
+```
+
+## Response Codes
+
+```php
+const OK = 200;                  // Route matched successfully
+const NOT_FOUND = 404;           // No matching route
+const METHOD_NOT_ALLOWED = 405;  // Route exists but wrong method
+const NOT_IMPLEMENTED = 501;     // HTTP method not supported
+```
+
+## Route Registration
+
+### add
+
+```php
+public function add(
+    array|string $method,
+    string $route,
+    string $handler,
+    ?string $marker = null
+): void
+```
+
+Registers a new route in the routing table.
+
+<ParamField path="method" type="array|string" required>
+  HTTP method(s): `Router::GET`, `Router::PST`, or `Router::DUO`
+</ParamField>
+
+<ParamField path="route" type="string" required>
+  URL pattern with optional parameters and anchors.
+</ParamField>
+
+<ParamField path="handler" type="string" required>
+  Controller and action as `'ControllerName:methodName'`
+</ParamField>
+
+<ParamField path="marker" type="string">
+  Unique identifier for link generation. Required for `link()` method.
+</ParamField>
+
+**Static Routes:**
+
+```php
+// Simple static route
+$router->add(
+    $router::GET,
+    '/login',
+    'Auth:login',
+    'Login'
+);
+
+// Multiple methods
+$router->add(
+    $router::DUO,
+    '/search',
+    'Search:view',
+    'Search'
+);
+```
+
+**Dynamic Routes with Parameters:**
+
+```php
+// Required parameter
+$router->add(
+    $router::GET,
+    '/user/{id|i:[1-9]\d*}/{name}',
+    'ProfileView:view',
+    'User'
+);
+
+// Optional parameters
+$router->add(
+    $router::GET,
+    '/forum/{id|i:[1-9]\d*}/{name}[/{page|i:[1-9]\d*}]',
+    'Forum:view',
+    'Forum'
+);
+
+// Multiple optional parameters
+$router->add(
+    $router::GET,
+    '/search[/simple/{keywords}[/{page|i:[1-9]\d*}]]',
+    'Search:view',
+    'Search'
+);
+```
+
+### Route Parameter Syntax
+
+**Basic Parameter:**
+```
+{name}
+```
+
+**Typed Parameter (integer):**
+```
+{id|i:[1-9]\d*}
+```
+
+**Custom Pattern:**
+```
+{action:(?!search)[a-z_]+}
+```
+
+**Parameter Format:**
+```
+{name|type:pattern}
+```
+
+<ParamField path="name" type="string" required>
+  Parameter name (alphanumeric, must start with letter)
+</ParamField>
+
+<ParamField path="type" type="string">
+  - `i` - Integer (auto-cast to int)
+  - `s` - String (default)
+</ParamField>
+
+<ParamField path="pattern" type="string">
+  Custom regex pattern (default: `[^/\x00-\x1f]+`)
+</ParamField>
+
+**Optional Parameters:**
+
+Wrap optional segments in square brackets:
+```
+/path[/optional[/nested]]
+```
+
+**Anchor Support:**
+
+```php
+$router->add(
+    $router::GET,
+    '/post/{id|i:[1-9]\d*}#p{id}',
+    'Topic:viewPost',
+    'ViewPost'
+);
+```
+
+## Request Routing
+
+### route
+
+```php
+public function route(string $method, string $uri): array
+```
+
+Matches a request URI against registered routes.
+
+<ParamField path="method" type="string" required>
+  HTTP method (GET, POST, HEAD, etc.)
+</ParamField>
+
+<ParamField path="uri" type="string" required>
+  Request URI to match (without query string)
+</ParamField>
+
+<ResponseField name="return" type="array">
+  Array with route result:
+  - `[OK, handler, args, marker]` - Success
+  - `[NOT_FOUND]` - No route found
+  - `[METHOD_NOT_ALLOWED, allowed]` - Wrong method
+  - `[NOT_IMPLEMENTED]` - Unsupported method
+</ResponseField>
+
+**Example:**
+
+```php ~/workspace/source/app/Controllers/Routing.php
+$route = $router->route('GET', '/user/42/john-doe');
+
+switch ($route[0]) {
+    case $router::OK:
+        // route[0] = 200
+        // route[1] = 'ProfileView:view'
+        // route[2] = ['id' => 42, 'name' => 'john-doe']
+        // route[3] = 'User'
+        list($page, $action) = explode(':', $route[1], 2);
+        $page = $this->c->$page->$action($route[2], 'GET');
+        break;
+
+    case $router::NOT_FOUND:
+        $page = $this->c->Message->message('Not Found', true, 404);
+        break;
+
+    case $router::METHOD_NOT_ALLOWED:
+        // route[1] contains allowed methods
+        $page = $this->c->Message->message('Bad request', true, 405);
+        break;
+}
+```
+
+## Link Generation
+
+### link
+
+```php
+public function link(?string $marker = null, array $args = []): string
+```
+
+Generates a URL from a route marker.
+
+<ParamField path="marker" type="string">
+  Route marker from `add()`. Null returns base URL.
+</ParamField>
+
+<ParamField path="args" type="array" default="[]">
+  Route parameters and special keys:
+  - Required parameters (e.g., `id`, `name`)
+  - Optional parameters (e.g., `page`)
+  - `#` - URL fragment/anchor
+  - `hash` - CSRF hash (auto-generated if route uses `{hash}`)
+  - `token` - CSRF token (auto-generated if route uses `{token}`)
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Complete URL with base URL and parameters.
+</ResponseField>
+
+**Static Routes:**
+
+```php
+// Link to login page
+$url = $this->c->Router->link('Login');
+// https://example.com/login
+
+// Link with anchor
+$url = $this->c->Router->link('Rules', ['#' => 'section-2']);
+// https://example.com/rules#section-2
+```
+
+**Dynamic Routes:**
+
+```php
+// User profile
+$url = $this->c->Router->link('User', [
+    'id' => 42,
+    'name' => 'john-doe'
+]);
+// https://example.com/user/42/john-doe
+
+// Forum with pagination
+$url = $this->c->Router->link('Forum', [
+    'id' => 5,
+    'name' => 'general-discussion',
+    'page' => 2
+]);
+// https://example.com/forum/5/general-discussion/2
+
+// Omit page=1 (automatically removed)
+$url = $this->c->Router->link('Forum', [
+    'id' => 5,
+    'name' => 'general',
+    'page' => 1
+]);
+// https://example.com/forum/5/general
+```
+
+**Automatic CSRF Tokens:**
+
+```php
+// Route with token
+$router->add(
+    $router::GET,
+    '/logout/{token}',
+    'Auth:logout',
+    'Logout'
+);
+
+// Token auto-generated
+$url = $this->c->Router->link('Logout');
+// https://example.com/logout/abc123token456
+
+// Manual token (overrides auto-generation)
+$url = $this->c->Router->link('Logout', ['token' => 'custom']);
+// https://example.com/logout/custom
+```
+
+**Special Characters:**
+
+Slashes and backslashes in parameters are encoded:
+
+```php
+$url = $this->c->Router->link('Search', [
+    'keywords' => 'path/to/file'
+]);
+// Converts '/' to '(_slash_)' in URL
+```
+
+## URL Validation
+
+### validate
+
+```php
+public function validate(
+    mixed $url,
+    string $defMarker,
+    array $defArgs = []
+): string
+```
+
+Validates if a URL belongs to the forum and returns a safe URL.
+
+<ParamField path="url" type="mixed" required>
+  URL to validate (typically string).
+</ParamField>
+
+<ParamField path="defMarker" type="string" required>
+  Default route marker if validation fails.
+</ParamField>
+
+<ParamField path="defArgs" type="array" default="[]">
+  Arguments for default route.
+</ParamField>
+
+<ResponseField name="return" type="string">
+  The validated URL or a link to the default route.
+</ResponseField>
+
+**Example:**
+
+```php
+// Validate redirect URL
+$redirect = $this->c->Router->validate(
+    $_GET['redirect'],
+    'Index',
+    []
+);
+
+// Valid forum URL returns as-is
+// Invalid/external URL returns link to Index
+```
+
+**Use Cases:**
+- Redirect after login
+- Return URL validation
+- Preventing open redirects
+
+## Real-World Examples
+
+### Complete Routing Setup
+
+```php ~/workspace/source/app/Controllers/Routing.php
+public function routing(): Page
+{
+    $user = $this->c->user;
+    $r = $this->c->Router;
+
+    // Guest routes
+    if ($user->isGuest) {
+        $r->add(
+            $r::DUO,
+            '/login',
+            'Auth:login',
+            'Login'
+        );
+        $r->add(
+            $r::DUO,
+            '/login/forget',
+            'Auth:forget',
+            'Forget'
+        );
+        $r->add(
+            $r::DUO,
+            '/login/{id|i:[1-9]\d*}/{key}/{hash}',
+            'Auth:changePass',
+            'ChangePassword'
+        );
+    } else {
+        $r->add(
+            $r::GET,
+            '/logout/{token}',
+            'Auth:logout',
+            'Logout'
+        );
+    }
+
+    // Public routes
+    $r->add(
+        $r::GET,
+        '/',
+        'Index:view',
+        'Index'
+    );
+    $r->add(
+        $r::GET,
+        '/forum/{id|i:[1-9]\d*}/{name}[/{page|i:[1-9]\d*}]',
+        'Forum:view',
+        'Forum'
+    );
+    $r->add(
+        $r::GET,
+        '/topic/{id|i:[1-9]\d*}/{name}[/{page|i:[1-9]\d*}]',
+        'Topic:viewTopic',
+        'Topic'
+    );
+
+    // Match request
+    $route = $r->route('GET', '/forum/5/general-discussion/2');
+    // Returns: [200, 'Forum:view', ['id'=>5, 'name'=>'general-discussion', 'page'=>2], 'Forum']
+
+    return $page;
+}
+```
+
+### Navigation Links
+
+```php
+// Breadcrumb navigation
+$crumbs = [
+    [$this->c->Router->link('Index'), 'Home'],
+    [$this->c->Router->link('Forum', ['id' => $forum->id, 'name' => $forum->name]), $forum->name],
+    [$this->c->Router->link('Topic', ['id' => $topic->id, 'name' => $topic->name]), $topic->name]
+];
+
+// Pagination
+for ($i = 1; $i <= $pages; $i++) {
+    $pageLinks[] = [
+        'url' => $this->c->Router->link('Forum', ['id' => $forum->id, 'name' => $forum->name, 'page' => $i]),
+        'number' => $i
+    ];
+}
+```
+
+### Protected Actions
+
+```php
+// Route with CSRF token
+$router->add(
+    $router::GET,
+    '/forum/{id|i:\d+}/markread/{token}',
+    'Misc:markread',
+    'MarkRead'
+);
+
+// Generate link (token auto-created)
+$markReadUrl = $this->c->Router->link('MarkRead', ['id' => $forum->id]);
+
+// In template
+<a href="<?= $markReadUrl ?>">Mark as Read</a>
+```
+
+### Complex Search Routes
+
+```php
+// Simple search
+$router->add(
+    $router::GET,
+    '/search[/simple/{keywords}[/{page|i:[1-9]\d*}]]',
+    'Search:view',
+    'Search'
+);
+
+// Advanced search
+$router->add(
+    $router::GET,
+    '/search/advanced[/{keywords}/{author}/{forums}/{serch_in:\d}/{sort_by:\d}/{sort_dir:\d}/{show_as:\d}[/{page|i:[1-9]\d*}]]',
+    'Search:viewAdvanced',
+    'SearchAdvanced'
+);
+
+// Generate URLs
+$simpleSearch = $this->c->Router->link('Search', ['keywords' => 'php programming']);
+$advancedSearch = $this->c->Router->link('SearchAdvanced', [
+    'keywords' => 'database',
+    'author' => 'john',
+    'forums' => '1,2,5',
+    'serch_in' => 0,
+    'sort_by' => 1,
+    'sort_dir' => 0,
+    'show_as' => 0,
+    'page' => 2
+]);
+```
+
+## Path Substitution
+
+The router automatically handles special characters:
+
+**Reserved Replacements:**
+- `/` → `(_slash_)`
+- `\` → `(_backslash_)`
+
+These are encoded in URLs and decoded during routing.
+
+## Best Practices
+
+<Card title="Use Markers for All Routes" icon="bookmark">
+  Always provide a marker for routes you'll reference with `link()`.
+  ```php
+  $router->add($router::GET, '/users', 'Users:list', 'UserList');
+  ```
+</Card>
+
+<Card title="Validate User Input URLs" icon="shield-check">
+  ```php
+  $url = $this->c->Router->validate($_POST['redirect'], 'Index');
+  ```
+  Never trust user-provided URLs for redirects.
+</Card>
+
+<Card title="Use Optional Parameters" icon="brackets-square">
+  ```php
+  '/topic/{id|i:[1-9]\d*}/{name}[/{page|i:[1-9]\d*}]'
+  ```
+  Make pagination and filters optional for cleaner URLs.
+</Card>
+
+<Card title="Leverage Auto-Token Generation" icon="key">
+  Let the router generate CSRF tokens automatically:
+  ```php
+  $url = $this->c->Router->link('Logout'); // Token added
+  ```
+</Card>
+
+<Card title="Group Related Routes" icon="layer-group">
+  ```php
+  if ($user->isGuest) {
+      // Guest-only routes
+  } else {
+      // Authenticated routes
+  }
+  ```
+  Organize routes by authentication/permission levels.
+</Card>
+
+## Common Patterns
+
+### RESTful Resources
+
+```php
+// List
+$router->add($router::GET, '/users', 'Users:index', 'UserList');
+
+// View
+$router->add($router::GET, '/users/{id|i:[1-9]\d*}', 'Users:show', 'UserView');
+
+// Create
+$router->add($router::DUO, '/users/new', 'Users:create', 'UserCreate');
+
+// Edit
+$router->add($router::DUO, '/users/{id|i:[1-9]\d*}/edit', 'Users:edit', 'UserEdit');
+
+// Delete
+$router->add($router::GET, '/users/{id|i:[1-9]\d*}/delete/{token}', 'Users:delete', 'UserDelete');
+```
+
+### Nested Resources
+
+```php
+// Forum topics
+$router->add(
+    $router::GET,
+    '/forum/{fid|i:[1-9]\d*}/topics[/{page|i:[1-9]\d*}]',
+    'Topics:index',
+    'ForumTopics'
+);
+
+// New topic in forum
+$router->add(
+    $router::DUO,
+    '/forum/{fid|i:[1-9]\d*}/topics/new',
+    'Topics:create',
+    'NewTopic'
+);
+```
+
+## See Also
+
+- [Container](/api/container) - Accessing the Router service
+- [Controllers](/controllers) - Route handlers
+- [Routing](/routing) - Routing concepts and patterns

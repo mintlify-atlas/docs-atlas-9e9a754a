@@ -1,0 +1,551 @@
+---
+title: Controllers
+description: Request handling, controller structure, and the Page base class in ForkBB
+icon: 'gears'
+---
+
+## Overview
+
+Controllers in ForkBB handle HTTP requests and orchestrate the application flow. They:
+
+- **Receive route parameters** from the Router
+- **Interact with models** to fetch/manipulate data
+- **Return Page objects** with view data
+- **Handle forms** and user input
+- **Enforce permissions** and access control
+
+## Controller Structure
+
+Controllers are simple classes with action methods:
+
+```php
+namespace ForkBB\Controllers;
+
+use ForkBB\Core\Container;
+use ForkBB\Models\Page;
+
+class MyController
+{
+    public function __construct(protected Container $c)
+    {
+    }
+    
+    /**
+     * Action method
+     * 
+     * @param array  $args   Route parameters
+     * @param string $method HTTP method (GET, POST, etc.)
+     * @return Page
+     */
+    public function actionName(array $args, string $method): Page
+    {
+        $page = $this->c->SomePage->create();
+        
+        // Handle request logic
+        
+        return $page;
+    }
+}
+```
+
+<Note>
+Controllers receive the **Container** in their constructor and must return a **Page** object from action methods.
+</Note>
+
+## The Routing Controller
+
+The main routing logic is in `app/Controllers/Routing.php`:
+
+```php app/Controllers/Routing.php
+class Routing
+{
+    public function __construct(protected Container $c) {}
+    
+    public function routing(): Page
+    {
+        $user = $this->c->user;
+        $r = $this->c->Router;
+        
+        // Define all routes (see routing.mdx for details)
+        $r->add($r::GET, '/', 'Index:view', 'Index');
+        $r->add($r::DUO, '/login', 'Auth:login', 'Login');
+        // ... many more routes ...
+        
+        // Match current request to route
+        $uri = FORK_URI;
+        $route = $r->route(FORK_RMETHOD, $uri);
+        
+        switch ($route[0]) {
+            case $r::OK:
+                // Execute matched controller action
+                list($page, $action) = \explode(':', $route[1], 2);
+                $page = $this->c->$page->$action($route[2], FORK_RMETHOD);
+                break;
+                
+            case $r::NOT_FOUND:
+                $page = $this->c->Message->message('Not Found', true, 404);
+                break;
+                
+            case $r::METHOD_NOT_ALLOWED:
+                $page = $this->c->Message->message('Bad request', true, 405);
+                break;
+        }
+        
+        return $page;
+    }
+}
+```
+
+## Example Controllers
+
+### Simple View Controller
+
+```php
+namespace ForkBB\Controllers;
+
+use ForkBB\Core\Container;
+use ForkBB\Models\Page;
+
+class Index
+{
+    public function __construct(protected Container $c) {}
+    
+    /**
+     * Display forum index
+     */
+    public function view(array $args, string $method): Page
+    {
+        // Load forum tree
+        $forums = $this->c->forums->loadTree();
+        
+        // Create page model
+        $page = $this->c->IndexPage->create();
+        $page->nameTpl = 'index';
+        $page->onlinePos = 'index';
+        $page->canonical = $this->c->Router->link('Index');
+        $page->robots = 'index, follow';
+        $page->forums = $forums;
+        
+        // Set breadcrumbs
+        $page->crumbs = $this->c->Func->crumbs([]);
+        
+        return $page;
+    }
+}
+```
+
+### Form Handling Controller
+
+```php
+namespace ForkBB\Controllers;
+
+use ForkBB\Core\Container;
+use ForkBB\Models\Page;
+
+class Auth
+{
+    public function __construct(protected Container $c) {}
+    
+    /**
+     * Login page and handler
+     */
+    public function login(array $args, string $method): Page
+    {
+        // Guest only
+        if (!$this->c->user->isGuest) {
+            return $this->c->Redirect->page('Index');
+        }
+        
+        $page = $this->c->LoginPage->create();
+        $page->nameTpl = 'login';
+        $page->onlinePos = 'login';
+        $page->fIndex = 'login';
+        
+        // Build form
+        $form = $this->c->FormLogin->create();
+        
+        // Handle POST request
+        if ('POST' === $method) {
+            $validator = $this->c->Validator;
+            $data = $validator->validation($form);
+            
+            if ($data['submit']) {
+                // Validate credentials
+                $user = $this->c->users->authenticate(
+                    $data['username'],
+                    $data['password']
+                );
+                
+                if ($user) {
+                    // Set cookie and redirect
+                    $this->c->Cookie->set('user', $user->id);
+                    return $this->c->Redirect->page('Index');
+                } else {
+                    $page->fIswev = ['w', 'Invalid credentials'];
+                }
+            }
+        }
+        
+        $page->form = $form;
+        return $page;
+    }
+}
+```
+
+### Controller with Permissions
+
+```php
+namespace ForkBB\Controllers;
+
+use ForkBB\Core\Container;
+use ForkBB\Models\Page;
+
+class Post
+{
+    public function __construct(protected Container $c) {}
+    
+    /**
+     * Create new topic
+     */
+    public function newTopic(array $args, string $method): Page
+    {
+        $forum = $this->c->forums->get($args['id']);
+        
+        // Check permissions
+        if (!$forum) {
+            return $this->c->Message->message('Bad request', false, 404);
+        }
+        
+        if (!$forum->canCreateTopic) {
+            return $this->c->Message->message('No permission', false, 403);
+        }
+        
+        $page = $this->c->PostPage->create();
+        $page->nameTpl = 'post';
+        $page->forum = $forum;
+        
+        // Handle POST
+        if ('POST' === $method) {
+            // Process form submission
+            $topic = $this->c->topics->create([
+                'forum_id' => $forum->id,
+                'poster_id' => $this->c->user->id,
+                'subject' => $data['subject'],
+            ]);
+            
+            $this->c->topics->insert($topic);
+            
+            return $this->c->Redirect->page('Topic', [
+                'id' => $topic->id
+            ]);
+        }
+        
+        return $page;
+    }
+}
+```
+
+## The Page Base Class
+
+All page models extend the `Page` class:
+
+```php app/Models/Page.php
+abstract class Page extends Model
+{
+    // Page identification
+    public string|array $identifier;   // CSS class for <body>
+    public string $fIndex;             // Active navigation item
+    
+    // HTTP response
+    public int $httpStatus = 200;      // HTTP status code
+    public array $httpHeaders = [];    // HTTP headers
+    
+    // Template
+    public ?string $nameTpl = null;    // Template name
+    
+    // Meta data
+    public array $titles = [];         // Page title parts
+    public string $robots;             // robots meta tag
+    public string $canonical;          // canonical URL
+    
+    // User data
+    public User $user;                 // Current user
+    public mixed $userRules;           // User permissions
+    
+    // Messages
+    public array $fIswev = [];         // Info/success/warning/error/validation
+    
+    // Online tracking
+    public ?string $onlinePos = null;  // Online position key
+    public bool $onlineDetail = false; // Show online users detail
+    public bool $onlineFilter = true;  // Filter by current page
+    
+    // Navigation
+    public array $fNavigation = [];    // Main navigation
+    public array $fNavigationUser = [];
+    
+    // Methods
+    public function prepare(): void;                      // Prepare for rendering
+    public function header(string $header, ?string $value): Page;
+    public function pageHeader(string $name, string $type, int $weight, ?array $values): mixed;
+    protected function crumbs(mixed ...$crumbs): array;   // Build breadcrumbs
+}
+```
+
+### Using the Page Class
+
+<Tabs>
+  <Tab title="Basic Page">
+    ```php
+    $page = $this->c->MyPage->create();
+    $page->nameTpl = 'my_template';     // Template to render
+    $page->identifier = 'my-page';      // CSS identifier
+    $page->fIndex = 'index';            // Active nav item
+    $page->onlinePos = 'my-page';       // For online tracking
+    
+    // Set title (builds breadcrumbs)
+    $page->titles = ['My Page'];
+    
+    // Set meta tags
+    $page->canonical = $this->c->Router->link('MyPage');
+    $page->robots = 'index, follow';
+    
+    return $page;
+    ```
+  </Tab>
+  
+  <Tab title="With Messages">
+    ```php
+    $page = $this->c->MyPage->create();
+    
+    // Success message
+    $page->fIswev = ['s', 'Changes saved successfully'];
+    
+    // Warning message
+    $page->fIswev = ['w', 'Please verify your email'];
+    
+    // Error message
+    $page->fIswev = ['e', 'Invalid input'];
+    
+    // Info message
+    $page->fIswev = ['i', 'New version available'];
+    
+    return $page;
+    ```
+  </Tab>
+  
+  <Tab title="With Custom Headers">
+    ```php
+    $page = $this->c->MyPage->create();
+    
+    // Add HTTP headers
+    $page->header('Content-Type', 'application/json');
+    $page->header('Cache-Control', 'no-cache');
+    
+    // Add page header (CSS/JS)
+    $page->pageHeader('myScript', 'script', 1000, [
+        'src' => '/js/my-script.js'
+    ]);
+    
+    $page->pageHeader('myStyle', 'link', 900, [
+        'rel' => 'stylesheet',
+        'href' => '/css/my-style.css'
+    ]);
+    
+    return $page;
+    ```
+  </Tab>
+  
+  <Tab title="With Breadcrumbs">
+    ```php
+    $page = $this->c->MyPage->create();
+    
+    // Build breadcrumbs from models
+    $page->crumbs = $this->c->Func->crumbs([
+        $forum,           // Forum model
+        $topic,           // Topic model
+        'Current Page'    // String
+    ]);
+    
+    // Manual breadcrumbs
+    $page->crumbs = $this->c->Func->crumbs([
+        [$url1, 'Page 1'],
+        [$url2, 'Page 2'],
+        'Current Page'
+    ]);
+    
+    return $page;
+    ```
+  </Tab>
+</Tabs>
+
+## Controller Patterns
+
+### Redirects
+
+```php
+// Redirect to named route
+return $this->c->Redirect->page('Index');
+
+// Redirect with parameters
+return $this->c->Redirect->page('Forum', ['id' => 123]);
+
+// Redirect to URL
+return $this->c->Redirect->url($url);
+```
+
+### Error Pages
+
+```php
+// 404 Not Found
+return $this->c->Message->message('Not Found', true, 404);
+
+// 403 Forbidden
+return $this->c->Message->message('No permission', false, 403);
+
+// 400 Bad Request
+return $this->c->Message->message('Bad request', false, 400);
+```
+
+### Permission Checks
+
+```php
+public function myAction(array $args, string $method): Page
+{
+    $user = $this->c->user;
+    
+    // Guest only
+    if (!$user->isGuest) {
+        return $this->c->Redirect->page('Index');
+    }
+    
+    // Authenticated only
+    if ($user->isGuest) {
+        return $this->c->Message->message('Login required', false, 403);
+    }
+    
+    // Admin only
+    if (!$user->isAdmin) {
+        return $this->c->Message->message('No permission', false, 403);
+    }
+    
+    // Permission-based
+    if (1 !== $user->g_post_topics) {
+        return $this->c->Message->message('No permission', false, 403);
+    }
+    
+    // Continue...
+}
+```
+
+### Form Validation
+
+```php
+public function formAction(array $args, string $method): Page
+{
+    $page = $this->c->MyPage->create();
+    $form = $this->c->FormBuilder->create();
+    
+    if ('POST' === $method) {
+        $validator = $this->c->Validator;
+        $data = $validator->validation($form);
+        
+        if ($data['submit']) {
+            // Process valid form
+            // ...
+            
+            return $this->c->Redirect->page('Success');
+        } else {
+            // Show validation errors
+            $page->fIswev = ['e', 'Please fix errors'];
+        }
+    }
+    
+    $page->form = $form;
+    return $page;
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep Controllers Thin">
+    Controllers should orchestrate, not contain business logic.
+    
+    ```php
+    // Good - logic in model
+    if ($topic->canReply) {
+        $reply = $topic->createReply($this->c->user, $data);
+    }
+    
+    // Bad - logic in controller
+    if ($topic->closed == 0 && $user->g_post_replies == 1) {
+        $reply = new Post(...);
+        // ... lots of code
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Always Return Page">
+    Every controller action must return a Page object.
+    
+    ```php
+    public function action(array $args, string $method): Page
+    {
+        // Always return Page
+        return $page;
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Check Permissions Early">
+    Validate permissions before doing expensive operations.
+    
+    ```php
+    // Check permissions first
+    if (!$user->isAdmin) {
+        return $this->c->Message->message('No permission', false, 403);
+    }
+    
+    // Then do expensive work
+    $data = $this->loadExpensiveData();
+    ```
+  </Accordion>
+  
+  <Accordion title="Use Type Hints">
+    Always type hint parameters and return types.
+    
+    ```php
+    public function action(array $args, string $method): Page
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Controller Registration
+
+Controllers are registered in the container configuration:
+
+```php config/main.dist.php
+'shared' => [
+    // Controllers
+    'Primary' => \ForkBB\Controllers\Primary::class,
+    'Routing' => \ForkBB\Controllers\Routing::class,
+    'Index' => \ForkBB\Controllers\Index::class,
+    'Auth' => \ForkBB\Controllers\Auth::class,
+    // ... more controllers
+]
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Views" icon="eye" href="/views">
+    Render controller data in templates
+  </Card>
+  <Card title="Models" icon="database" href="/models">
+    Work with data in controllers
+  </Card>
+  <Card title="Routing" icon="route" href="/routing">
+    Define routes for controllers
+  </Card>
+</CardGroup>

@@ -1,0 +1,346 @@
+---
+title: 'CLI Commands'
+description: 'Command-line interface tools for ForkBB installation and maintenance'
+---
+
+## Overview
+
+ForkBB provides a command-line interface (`cli.php`) for performing administrative tasks such as installing the forum software and managing the email queue. All commands are executed through PHP's CLI SAPI.
+
+<Warning>
+  CLI commands must be run from the console using PHP CLI. They will not work when accessed through a web browser.
+</Warning>
+
+## Basic Usage
+
+All CLI commands follow this basic syntax:
+
+```bash
+php cli.php [command] [options]
+```
+
+## Available Commands
+
+### install
+
+Installs ForkBB from the command line with all necessary configuration parameters.
+
+<Note>
+  This command is only available when `config/install.php` exists and `config/main.php` does not yet exist.
+</Note>
+
+#### Syntax
+
+```bash
+php cli.php install \
+  --installlang=LANGUAGE \
+  --dbtype=DATABASE_TYPE \
+  --dbhost=DB_HOST \
+  --dbname=DB_NAME \
+  --dbuser=DB_USERNAME \
+  --dbpass=DB_PASSWORD \
+  --dbprefix=DB_PREFIX \
+  --username=ADMIN_LOGIN \
+  --password="ADMIN_PASSWORD" \
+  --email=ADMIN_EMAIL \
+  --title="FORUM_TITLE" \
+  --descr="FORUM_DESCRIPTION" \
+  --baseurl=FORUM_URL \
+  --defaultlang=DEFAULT_LANGUAGE \
+  --defaultstyle=DEFAULT_STYLE \
+  --cookie_domain=COOKIE_DOMAIN \
+  --cookie_path=COOKIE_PATH \
+  --cookie_secure=COOKIE_SECURE
+```
+
+#### Parameters
+
+<ParamField path="installlang" type="string" required>
+  Installation language. Options: `en`, `es`, `fr`, `ru`
+</ParamField>
+
+<ParamField path="dbtype" type="string" required>
+  Database type. Options: `mysql_innodb`, `mysql`, `pgsql`, `sqlite`
+</ParamField>
+
+<ParamField path="dbhost" type="string" required>
+  Database host (e.g., `localhost` or `127.0.0.1`)
+</ParamField>
+
+<ParamField path="dbname" type="string" required>
+  Database name
+</ParamField>
+
+<ParamField path="dbuser" type="string" required>
+  Database username
+</ParamField>
+
+<ParamField path="dbpass" type="string" required>
+  Database password
+</ParamField>
+
+<ParamField path="dbprefix" type="string" required>
+  Database table prefix (can be empty)
+</ParamField>
+
+<ParamField path="username" type="string" required>
+  Administrator username
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  Administrator password. Must be at least 16 characters or contain multiple words.
+</ParamField>
+
+<ParamField path="email" type="string" required>
+  Administrator email address
+</ParamField>
+
+<ParamField path="title" type="string" required>
+  Forum title
+</ParamField>
+
+<ParamField path="descr" type="string">
+  Forum description. Use `EMPTY` for no description or provide text in quotes.
+</ParamField>
+
+<ParamField path="baseurl" type="string" required>
+  Forum base URL (e.g., `https://forum.example.com`)
+</ParamField>
+
+<ParamField path="defaultlang" type="string" required>
+  Default language for the forum. Options: `en`, `es`, `fr`, `ru`
+</ParamField>
+
+<ParamField path="defaultstyle" type="string" required>
+  Default theme/style. Default: `ForkBB`
+</ParamField>
+
+<ParamField path="cookie_domain" type="string">
+  Cookie domain (can be empty)
+</ParamField>
+
+<ParamField path="cookie_path" type="string">
+  Cookie path. Default: `/`
+</ParamField>
+
+<ParamField path="cookie_secure" type="string">
+  Whether to use secure cookies. Options: `1` (HTTPS only) or `0` (any)
+</ParamField>
+
+#### Example
+
+<Steps>
+  <Step title="Navigate to the ForkBB directory">
+    ```bash
+    cd /path/to/forkbb/app
+    ```
+  </Step>
+  
+  <Step title="Run the installation command">
+    ```bash
+    php cli.php install \
+      --installlang=en \
+      --dbtype=mysql_innodb \
+      --dbhost=localhost \
+      --dbname=forkbb \
+      --dbuser=forkbb_user \
+      --dbpass="secure_password" \
+      --dbprefix=fbb_ \
+      --username=admin \
+      --password="Strong Admin Password 123" \
+      --email=admin@example.com \
+      --title="My ForkBB Forum" \
+      --descr="A community discussion forum" \
+      --baseurl=https://forum.example.com \
+      --defaultlang=en \
+      --defaultstyle=ForkBB \
+      --cookie_domain= \
+      --cookie_path=/ \
+      --cookie_secure=1
+    ```
+  </Step>
+  
+  <Step title="Verify installation">
+    If successful, the command will output `Ok`. Any errors will be displayed with detailed messages.
+  </Step>
+</Steps>
+
+<Tip>
+  Use quotes around parameters that contain spaces or special characters.
+</Tip>
+
+### send_mail
+
+Processes the email queue and sends pending emails. This command is designed to be run periodically via cron or task scheduler.
+
+<Note>
+  This command requires `config/main.php` to exist (i.e., ForkBB must be installed).
+</Note>
+
+#### Syntax
+
+```bash
+php cli.php send_mail [--log=LEVEL]
+```
+
+#### Parameters
+
+<ParamField path="log" type="string">
+  Logging level:
+  - `1` - Log only when tasks are completed or the script cannot obtain an exclusive lock
+  - `2` - Log every execution regardless of result
+</ParamField>
+
+#### Example
+
+<Steps>
+  <Step title="Process email queue with minimal logging">
+    ```bash
+    php cli.php send_mail --log=1
+    ```
+  </Step>
+  
+  <Step title="Set up a cron job for automated processing">
+    ```cron
+    # Process email queue every 5 minutes
+    */5 * * * * /usr/bin/php /path/to/forkbb/app/cli.php send_mail --log=1
+    ```
+  </Step>
+</Steps>
+
+#### How It Works
+
+1. The command retrieves pending emails from the queue
+2. Each email is processed through the Mail service
+3. The queue uses exclusive locking to prevent concurrent execution
+4. Completed tasks are logged based on the `--log` parameter
+5. The result indicates the number of tasks completed (or `false` if locked)
+
+<Tip>
+  Use `--log=1` for cron jobs to minimize log entries while still capturing important events.
+</Tip>
+
+### test
+
+A diagnostic command that writes a test entry to the ForkBB log to verify CLI functionality.
+
+<Note>
+  This command requires `config/main.php` to exist (i.e., ForkBB must be installed).
+</Note>
+
+#### Syntax
+
+```bash
+php cli.php test
+```
+
+#### Example
+
+```bash
+php cli.php test
+```
+
+This command outputs `Ok` on success and logs the following information:
+- PHP version
+- PHP SAPI (always `cli`)
+- Execution time
+- User information (guest user)
+
+<Info>
+  Use this command to verify that the CLI environment is properly configured before running other commands.
+</Info>
+
+## Error Handling
+
+### Invalid Command
+
+If you specify a command that doesn't exist or isn't available in the current context:
+
+```bash
+Invalid command. [command_name]
+```
+
+### Application Not Configured
+
+If neither `config/main.php` nor `config/install.php` exists:
+
+```bash
+Application is not configured
+```
+
+### Command Availability
+
+- **install**: Only available when ForkBB is not yet installed
+- **test** and **send_mail**: Only available when ForkBB is fully installed
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use absolute paths">
+    When setting up automated tasks (cron jobs), always use absolute paths to the PHP binary and `cli.php` script:
+    
+    ```bash
+    /usr/bin/php /var/www/forkbb/app/cli.php send_mail --log=1
+    ```
+  </Accordion>
+  
+  <Accordion title="Secure your credentials">
+    When running the install command, ensure that your shell history doesn't capture sensitive data. Consider using environment variables or configuration files for sensitive parameters.
+  </Accordion>
+  
+  <Accordion title="Monitor log files">
+    Enable logging for send_mail operations to track email delivery and troubleshoot issues:
+    
+    ```bash
+    php cli.php send_mail --log=2
+    ```
+  </Accordion>
+  
+  <Accordion title="Test before automating">
+    Before setting up cron jobs, manually test commands to ensure they work correctly in your environment.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Permission denied errors">
+    Ensure the PHP CLI binary has execute permissions and the script is readable:
+    
+    ```bash
+    chmod +x cli.php
+    ```
+  </Accordion>
+  
+  <Accordion title="Database connection failures">
+    Verify that your database credentials are correct and the database server is accessible from the command line environment.
+  </Accordion>
+  
+  <Accordion title="Email queue not processing">
+    Check that:
+    - The database connection is working
+    - The mail configuration in `config/main.php` is correct
+    - The send_mail command has proper file system permissions
+    - No other process has locked the queue
+  </Accordion>
+</AccordionGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Complete installation instructions including web-based setup
+  </Card>
+  
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Learn about ForkBB configuration options
+  </Card>
+  
+  <Card title="Database Documentation" icon="database" href="/api/database">
+    Database connection and query management
+  </Card>
+  
+  <Card title="Container Service" icon="box" href="/api/container">
+    Understanding the dependency injection container
+  </Card>
+</CardGroup>

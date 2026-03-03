@@ -1,0 +1,378 @@
+---
+title: Installation
+description: Step-by-step guide to install ForkBB on Apache or Nginx servers
+---
+
+# Installing ForkBB
+
+This guide will walk you through installing ForkBB on your web server. ForkBB supports both Apache and Nginx web servers with flexible deployment options.
+
+## System requirements
+
+Before starting the installation, verify your server meets these requirements:
+
+### PHP requirements
+
+- **PHP 8.0 or higher**
+- **Required PHP extensions:**
+  - `pdo` - PDO database abstraction
+  - `intl` - Internationalization functions
+  - `json` - JSON data handling
+  - `mbstring` - Multi-byte string support
+  - `fileinfo` - File information functions
+
+### Recommended PHP extensions
+
+<Note>
+While these extensions are optional, they enable important features:
+</Note>
+
+- `imagick` or `gd` - Required for uploading avatars and processing images
+- `openssl` - Needed for sending email via SMTP using SSL/TLS
+- `curl` - Required for OAuth authentication (GitHub, Google, Yandex)
+
+### Database requirements
+
+One of the following databases:
+
+- **MySQL 5.5.3+** (using a PHP extension with mysqlnd driver)
+- **SQLite 3.25+**
+- **PostgreSQL 10+**
+
+### Composer dependencies
+
+ForkBB requires these PHP packages (automatically managed via Composer):
+
+```json composer.json
+{
+  "require": {
+    "php": ">=8.0.0",
+    "ext-mbstring": "*",
+    "ext-fileinfo": "*",
+    "ext-intl": "*",
+    "ext-json": "*",
+    "ext-pdo": "*",
+    "miovisman/parserus": "^1.5.0",
+    "miovisman/normemail": "^1.0.0",
+    "psr/simple-cache": "^3",
+    "psr/log": "^3",
+    "miovisman/jevix": "^2.3.0"
+  }
+}
+```
+
+## Installation for Apache
+
+Apache requires `mod_rewrite` and `mod_headers` modules enabled, with `AllowOverride` set to `All`.
+
+### Option 1: Shared hosting (Document Root ≠ /public/)
+
+Use this method for shared hosting environments or when installing in a site subfolder.
+
+<Warning>
+If you install the forum in a site folder rather than the document root, there may be conflicts between the forum's `.htaccess` rules and the site's `.htaccess` rules.
+</Warning>
+
+<Steps>
+  <Step title="Download ForkBB">
+    Download the latest ForkBB release and extract it to your desired location
+  </Step>
+  
+  <Step title="Rename configuration files">
+    Rename the distribution files to their active versions:
+    
+    ```bash
+    mv .dist.htaccess .htaccess
+    mv index.dist.php index.php
+    ```
+  </Step>
+  
+  <Step title="Set file permissions">
+    Ensure the web server has write access to these directories:
+    
+    ```bash
+    chmod -R 755 app/cache
+    chmod -R 755 app/log
+    ```
+  </Step>
+  
+  <Step title="Access the installer">
+    Navigate to your forum URL in a web browser to launch the installation wizard
+  </Step>
+</Steps>
+
+### Option 2: VPS/VDS with Apache configuration access (Document Root = /public/)
+
+This is the recommended method for VPS/VDS environments where you can configure the document root.
+
+<Steps>
+  <Step title="Configure document root">
+    Set your Apache document root to point to the `/public/` directory:
+    
+    ```apache
+    DocumentRoot "/path/to/forkbb/public"
+    <Directory "/path/to/forkbb/public">
+        AllowOverride All
+        Require all granted
+    </Directory>
+    ```
+  </Step>
+  
+  <Step title="Rename public directory files">
+    Rename the distribution files in the `/public/` directory:
+    
+    ```bash
+    cd public/
+    mv .dist.htaccess .htaccess
+    mv index.dist.php index.php
+    ```
+  </Step>
+  
+  <Step title="Set permissions">
+    Configure directory permissions:
+    
+    ```bash
+    chmod -R 755 ../app/cache
+    chmod -R 755 ../app/log
+    ```
+  </Step>
+  
+  <Step title="Restart Apache">
+    Restart Apache to apply the configuration changes:
+    
+    ```bash
+    sudo systemctl restart apache2
+    ```
+  </Step>
+</Steps>
+
+### Apache .htaccess configuration
+
+ForkBB includes a comprehensive `.htaccess` file with security headers and URL rewriting:
+
+```apache .dist.htaccess
+AddDefaultCharset UTF-8
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  
+  RewriteRule ^favicon\.ico$ public/favicon.ico [END]
+  RewriteRule ^apple-touch-icon\.png$ public/apple-touch-icon.png [END]
+  RewriteRule ^robots\.txt$ public/robots.txt [END]
+  
+  RewriteRule !^public/ index.php [END]
+  
+  # Versioned assets (cache busting)
+  RewriteCond %{REQUEST_URI} \.v\.[0-9]
+  RewriteRule ^(.+)\.v\.[0-9]+\.([^.\\/]++)$ $1.$2 [L]
+  
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^public/ index.php [END]
+</IfModule>
+
+# Security headers
+<ifModule mod_headers.c>
+  Header always set Content-Security-Policy "default-src 'self';object-src 'none';frame-ancestors 'none';base-uri 'none';form-action 'self'"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header unset X-Powered-By
+</ifModule>
+```
+
+## Installation for Nginx
+
+Nginx configuration is more flexible and doesn't require renaming the `index.dist.php` file.
+
+<Note>
+The document root **must** point to the `/public/` directory for Nginx installations.
+</Note>
+
+<Steps>
+  <Step title="Download and extract ForkBB">
+    Download ForkBB and extract it to your desired location
+  </Step>
+  
+  <Step title="Configure Nginx">
+    Create or modify your Nginx server configuration. Here's the recommended configuration:
+    
+    ```nginx nginx.conf
+    server {
+        listen 80;
+        server_name forum.example.com;
+        root "/path/to/forkbb/public";
+        
+        autoindex off;
+        charset utf-8;
+        server_tokens off;
+        
+        # Favicon and robots.txt
+        location = /favicon.ico {
+            access_log off;
+            log_not_found off;
+            expires 1w;
+            etag off;
+        }
+        
+        location = /robots.txt {
+            access_log off;
+            log_not_found off;
+        }
+        
+        # Main PHP handler
+        location / {
+            fastcgi_hide_header X-Powered-By;
+            fastcgi_index index.dist.php;
+            
+            include fastcgi_params;
+            fastcgi_param HTTP_PROXY "";
+            fastcgi_param SCRIPT_FILENAME $realpath_root/index.dist.php;
+            fastcgi_param DOCUMENT_ROOT $realpath_root;
+            
+            # Adjust for your PHP-FPM configuration
+            fastcgi_pass unix:/var/run/php-fpm.sock;
+            # Or use TCP: fastcgi_pass 127.0.0.1:9000;
+        }
+        
+        # Static assets with versioning
+        location ~ ^/(?:js|img|style|upload)/ {
+            # Cache-busted versioned files
+            location ~ ^(.+)\.v\.[0-9]+\.([^.\\/]++)$ {
+                try_files $1.$2 =404;
+                add_header Cache-Control "public,max-age=31536000,immutable";
+                etag off;
+            }
+            
+            # Regular static files
+            location ~ \.(css|js|gif|png|jpg|jpeg|webp|avif|woff|woff2|svg)$ {
+                try_files $uri =404;
+                add_header Cache-Control "public,max-age=31536000,immutable";
+                etag off;
+            }
+            
+            # Block .htaccess files
+            location ~ /\.ht {
+                return 404;
+            }
+        }
+    }
+    ```
+  </Step>
+  
+  <Step title="Set permissions">
+    Configure directory permissions:
+    
+    ```bash
+    chmod -R 755 app/cache
+    chmod -R 755 app/log
+    ```
+  </Step>
+  
+  <Step title="Test and reload Nginx">
+    Test your configuration and reload Nginx:
+    
+    ```bash
+    sudo nginx -t
+    sudo systemctl reload nginx
+    ```
+  </Step>
+  
+  <Step title="Access the installer">
+    Navigate to your forum URL to begin the installation process
+  </Step>
+</Steps>
+
+### Key Nginx configuration notes
+
+<Info>
+**Important differences from Apache:**
+
+- Root must point to the `/public/` directory
+- The `index.dist.php` file does **not** need to be renamed
+- FastCGI parameters must be configured correctly
+- Static file caching is handled via location blocks
+</Info>
+
+## Favicon configuration
+
+ForkBB includes a default 48x48 favicon that you can use or replace:
+
+<CodeGroup>
+
+```bash "Rename default favicon"
+# Use the included favicon
+mv public/favicon48.ico public/favicon.ico
+```
+
+```bash "Use custom favicon"
+# Copy your custom favicon
+cp /path/to/your/favicon.ico public/favicon.ico
+```
+
+</CodeGroup>
+
+## Post-installation steps
+
+<Steps>
+  <Step title="Complete web installer">
+    Follow the web-based installation wizard to configure your database and create the admin account
+  </Step>
+  
+  <Step title="Configure main settings">
+    Edit the `app/config/main.php` file to customize your installation. See the [configuration guide](/configuration) for details
+  </Step>
+  
+  <Step title="Set up cron jobs (optional)">
+    Configure cron jobs for mail queue processing:
+    
+    ```bash
+    # Process mail queue every 5 minutes
+    */5 * * * * cd /path/to/forkbb && php cli.php send_mail
+    ```
+  </Step>
+  
+  <Step title="Secure your installation">
+    - Remove or restrict access to the installer files
+    - Review and customize security headers
+    - Configure SSL/TLS certificates
+    - Set up regular database backups
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+### Permission errors
+
+If you encounter permission errors, ensure the web server user has write access:
+
+```bash
+# For Apache (www-data user)
+sudo chown -R www-data:www-data app/cache app/log
+
+# For Nginx (nginx user)
+sudo chown -R nginx:nginx app/cache app/log
+```
+
+### Rewrite rules not working
+
+**Apache:** Verify that `mod_rewrite` is enabled:
+
+```bash
+sudo a2enmod rewrite
+sudo systemctl restart apache2
+```
+
+**Nginx:** Check that your FastCGI parameters are correct and the location blocks are properly configured.
+
+### Database connection errors
+
+Verify your database credentials in `app/config/main.php` and ensure the database user has proper permissions:
+
+```sql
+GRANT ALL PRIVILEGES ON forum_db.* TO 'forum_user'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+## Next steps
+
+Now that ForkBB is installed, proceed to the [configuration guide](/configuration) to customize your forum settings.

@@ -1,0 +1,308 @@
+---
+title: Post Model
+description: Post model API reference for ForkBB forum software
+---
+
+The `Post` model represents an individual post/message in a topic. It extends `DataModel` and provides properties and methods for managing post content, permissions, and user interactions.
+
+## Location
+
+`app/Models/Post/Post.php`
+
+## Properties
+
+<ParamField path="id" type="int">
+  Unique post identifier
+</ParamField>
+
+<ParamField path="topic_id" type="int">
+  ID of the parent topic
+</ParamField>
+
+<ParamField path="poster_id" type="int">
+  ID of the user who created the post
+</ParamField>
+
+<ParamField path="poster" type="string">
+  Username of the poster (stored for guests)
+</ParamField>
+
+<ParamField path="poster_email" type="string">
+  Email of the poster (for guests)
+</ParamField>
+
+<ParamField path="poster_ip" type="string">
+  IP address of the poster
+</ParamField>
+
+<ParamField path="message" type="string">
+  Raw post content (BBCode or markdown)
+</ParamField>
+
+<ParamField path="posted" type="int">
+  Timestamp when post was created
+</ParamField>
+
+<ParamField path="edited" type="int">
+  Timestamp of last edit (0 if never edited)
+</ParamField>
+
+<ParamField path="editor_id" type="int">
+  ID of user who last edited the post
+</ParamField>
+
+<ParamField path="edit_post" type="int">
+  Edit flag/counter
+</ParamField>
+
+<ParamField path="hide_smilies" type="int">
+  Whether to hide smilies (0=show, 1=hide)
+</ParamField>
+
+## Computed Properties
+
+<ResponseField name="parent" type="Topic|null">
+  Parent topic object. Returns `null` if topic is invalid or moved.
+</ResponseField>
+
+<ResponseField name="user" type="User">
+  User object for the post author. Returns guest user if poster_id < 1.
+</ResponseField>
+
+<ResponseField name="link" type="string">
+  Direct URL to this post
+</ResponseField>
+
+## Permission Properties
+
+<ResponseField name="canReport" type="bool">
+  Returns `true` if current user can report this post
+</ResponseField>
+
+<ResponseField name="canDelete" type="bool">
+  Returns `true` if current user can delete this post
+</ResponseField>
+
+<ResponseField name="canEdit" type="bool">
+  Returns `true` if current user can edit this post
+</ResponseField>
+
+<ResponseField name="canQuote" type="bool">
+  Returns `true` if current user can quote this post (same as canReply on parent topic)
+</ResponseField>
+
+<ResponseField name="useReaction" type="bool">
+  Returns `true` if current user can react to this post
+</ResponseField>
+
+## Link Properties
+
+<ResponseField name="linkReport" type="string">
+  URL to report this post
+</ResponseField>
+
+<ResponseField name="linkDelete" type="string">
+  URL to delete this post
+</ResponseField>
+
+<ResponseField name="linkEdit" type="string">
+  URL to edit this post
+</ResponseField>
+
+<ResponseField name="linkAnD" type="string">
+  URL to edit author and date (admin/moderator only)
+</ResponseField>
+
+<ResponseField name="linkQuote" type="string">
+  URL to reply with quote
+</ResponseField>
+
+<ResponseField name="linkGetHost" type="string">
+  URL to view IP/host information (admin only)
+</ResponseField>
+
+<ResponseField name="linkSolution" type="string">
+  URL to mark/unmark post as solution
+</ResponseField>
+
+## Methods
+
+### html()
+
+Returns the parsed HTML content of the post.
+
+```php
+public function html(): string
+```
+
+**Returns:** HTML-formatted, censored post content
+
+**Example:**
+```php
+$post = $container->posts->load(123);
+echo $post->html();
+```
+
+### reactionData()
+
+Generates reaction form data for this post.
+
+```php
+public function reactionData(bool $allow = true): ?array
+```
+
+<ParamField path="allow" type="bool">
+  Whether to allow reactions
+</ParamField>
+
+**Returns:** Array of reaction data or `null`
+
+**Example:**
+```php
+$post = $container->posts->load(123);
+$reactions = $post->reactionData();
+
+if ($reactions) {
+    // Display reaction options
+    foreach ($reactions['available'] as $reaction) {
+        echo "<button>{$reaction['emoji']}</button>";
+    }
+}
+```
+
+## Usage Example
+
+```php
+// Load a post
+$post = $container->posts->load(456);
+
+// Display post content
+echo "<div class='post' id='p{$post->id}'>";
+
+// Display author info
+$author = $post->user;
+echo "<div class='author'>";
+if (!$author->isGuest && $author->avatar) {
+    echo "<img src=\"{$author->avatar}\" alt='Avatar'>";
+}
+echo "<strong>{$author->username}</strong><br>";
+echo $author->title();
+echo "</div>";
+
+// Display post message
+echo "<div class='message'>";
+echo $post->html();
+echo "</div>";
+
+// Display post metadata
+echo "<div class='meta'>";
+echo "Posted: " . date('Y-m-d H:i:s', $post->posted);
+
+if ($post->edited > 0) {
+    echo " (Edited: " . date('Y-m-d H:i:s', $post->edited) . ")";
+}
+echo "</div>";
+
+// Display action buttons
+echo "<div class='actions'>";
+
+if ($post->canEdit) {
+    echo "<a href=\"{$post->linkEdit}\">Edit</a> ";
+}
+
+if ($post->canDelete) {
+    echo "<a href=\"{$post->linkDelete}\">Delete</a> ";
+}
+
+if ($post->canQuote) {
+    echo "<a href=\"{$post->linkQuote}\">Quote</a> ";
+}
+
+if ($post->canReport) {
+    echo "<a href=\"{$post->linkReport}\">Report</a> ";
+}
+
+// Admin/moderator actions
+if ($container->user->isAdmMod) {
+    echo "<a href=\"{$post->linkGetHost}\">IP: {$post->poster_ip}</a> ";
+    echo "<a href=\"{$post->linkAnD}\">Edit Author/Date</a> ";
+}
+
+echo "</div>";
+
+// Display reactions if enabled
+if ($post->useReaction) {
+    $reactions = $post->reactionData();
+    if ($reactions) {
+        echo "<div class='reactions'>";
+        // Render reaction interface
+        echo "</div>";
+    }
+}
+
+echo "</div>";
+```
+
+## Post Editing Example
+
+```php
+// Load post and check edit permission
+$post = $container->posts->load(456);
+
+if (!$post->canEdit) {
+    throw new Exception('You cannot edit this post');
+}
+
+// Update post content
+$post->message = 'Updated post content with [b]BBCode[/b]';
+$post->edited = time();
+$post->editor_id = $container->user->id;
+
+// Save changes
+$container->posts->update($post);
+
+// Update topic table of contents if needed
+if ($post->parent->poster_id === $post->poster_id) {
+    // Parse the message to extract headings
+    $container->Parser->parseMessage($post->message);
+    $post->parent->addPostToToc($post);
+    $container->topics->update($post->parent);
+}
+```
+
+## Permission Checking Example
+
+```php
+$post = $container->posts->load(456);
+$currentUser = $container->user;
+
+// Check various permissions
+if ($post->canEdit) {
+    echo "You can edit this post\n";
+}
+
+if ($post->canDelete) {
+    echo "You can delete this post\n";
+}
+
+if ($currentUser->isAdmin) {
+    // Admins can always edit/delete
+    echo "Admin can see IP: {$post->poster_ip}\n";
+}
+
+if ($currentUser->isModerator($post)) {
+    // Moderators have special permissions
+    echo "You moderate this post's forum\n";
+}
+
+// Check if user is the author
+if ($post->poster_id === $currentUser->id) {
+    echo "You are the author of this post\n";
+    
+    // Check edit time limits
+    $editInterval = $currentUser->g_deledit_interval;
+    if ($editInterval > 0 && time() - $post->posted > $editInterval) {
+        echo "Edit time limit expired\n";
+    }
+}
+```

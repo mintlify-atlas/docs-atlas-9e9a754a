@@ -1,0 +1,262 @@
+---
+title: User Model
+description: User model API reference for ForkBB forum software
+---
+
+The `User` model represents a user in the ForkBB forum system. It extends `DataModel` and provides properties and methods for managing user data, permissions, and profile information.
+
+## Location
+
+`app/Models/User/User.php`
+
+## Properties
+
+<ParamField path="id" type="int">
+  Unique user identifier
+</ParamField>
+
+<ParamField path="group_id" type="int">
+  User's group ID. Determines user role and permissions
+</ParamField>
+
+<ParamField path="username" type="string">
+  User's display name
+</ParamField>
+
+<ParamField path="email" type="string">
+  User's email address
+</ParamField>
+
+<ParamField path="title" type="string">
+  Custom user title
+</ParamField>
+
+<ParamField path="signature" type="string">
+  User's signature displayed below posts
+</ParamField>
+
+<ParamField path="last_visit" type="int">
+  Timestamp of last visit
+</ParamField>
+
+<ParamField path="avatar" type="string">
+  Avatar file path or URL
+</ParamField>
+
+<ParamField path="language" type="string">
+  User's preferred language code
+</ParamField>
+
+<ParamField path="style" type="string">
+  User's preferred theme/style
+</ParamField>
+
+<ParamField path="disp_topics" type="int">
+  Number of topics to display per page (minimum 10)
+</ParamField>
+
+<ParamField path="disp_posts" type="int">
+  Number of posts to display per page (minimum 10)
+</ParamField>
+
+## Status Properties
+
+<ResponseField name="isGuest" type="bool">
+  Returns `true` if user is a guest (not authenticated)
+</ResponseField>
+
+<ResponseField name="isUnverified" type="bool">
+  Returns `true` if user account is unverified
+</ResponseField>
+
+<ResponseField name="isAdmin" type="bool">
+  Returns `true` if user is an administrator
+</ResponseField>
+
+<ResponseField name="isAdmMod" type="bool">
+  Returns `true` if user is an administrator or moderator
+</ResponseField>
+
+<ResponseField name="isBanByName" type="bool">
+  Returns `true` if user is banned by username
+</ResponseField>
+
+<ResponseField name="online" type="bool">
+  Returns `true` if user is currently online
+</ResponseField>
+
+<ResponseField name="isSignature" type="bool">
+  Returns `true` if user has a signature configured
+</ResponseField>
+
+<ResponseField name="usePM" type="bool">
+  Returns `true` if user can use private messages
+</ResponseField>
+
+## Methods
+
+### isModerator()
+
+Checks if user is a moderator for a specific model.
+
+```php
+public function isModerator(Model $model): bool
+```
+
+<ParamField path="model" type="Model">
+  The model (typically a Forum) to check moderator status for
+</ParamField>
+
+**Returns:** `bool` - `true` if user moderates the given forum
+
+**Example:**
+```php
+$user = $container->user;
+$forum = $container->forums->get(5);
+
+if ($user->isModerator($forum)) {
+    // User can moderate this forum
+}
+```
+
+### deleteAvatar()
+
+Deletes the user's avatar file.
+
+```php
+public function deleteAvatar(): void
+```
+
+**Example:**
+```php
+$user = $container->users->load(123);
+$user->deleteAvatar();
+```
+
+### title()
+
+Returns the user's display title based on status and custom settings.
+
+```php
+public function title(): string
+```
+
+**Returns:** User title (e.g., "Guest", "Banned", "Member", custom title)
+
+**Example:**
+```php
+$user = $container->user;
+echo $user->title(); // "Administrator" or "Member" etc.
+```
+
+### linkPromote()
+
+Generates a link to promote a user based on a post they made.
+
+```php
+public function linkPromote(Post $post): ?string
+```
+
+<ParamField path="post" type="Post">
+  The post to evaluate for user promotion
+</ParamField>
+
+**Returns:** `string|null` - Promotion URL or `null` if not available
+
+**Example:**
+```php
+$currentUser = $container->user;
+$post = $container->posts->load(456);
+
+$promoteLink = $currentUser->linkPromote($post);
+if ($promoteLink) {
+    echo "<a href=\"{$promoteLink}\">Promote User</a>";
+}
+```
+
+### fLog()
+
+Returns formatted user information for logging purposes.
+
+```php
+public function fLog(): string
+```
+
+**Returns:** Log-formatted string with user ID, group ID, and name
+
+**Example:**
+```php
+$user = $container->user;
+error_log('User action: ' . $user->fLog());
+// Output: "User action: id:123 gid:1 name:john_doe"
+```
+
+## Computed Properties
+
+<ResponseField name="link" type="string|null">
+  URL to user's profile page. Returns `null` for guests.
+</ResponseField>
+
+<ResponseField name="avatar" type="string|null">
+  Full URL to user's avatar image. Returns `null` if no avatar.
+</ResponseField>
+
+<ResponseField name="currentVisit" type="int">
+  Timestamp of current or last visit
+</ResponseField>
+
+<ResponseField name="htmlSign" type="string">
+  HTML-formatted signature (parsed and censored)
+</ResponseField>
+
+<ResponseField name="email_normal" type="string">
+  Normalized email address
+</ResponseField>
+
+<ResponseField name="username_normal" type="string">
+  Normalized username
+</ResponseField>
+
+<ResponseField name="linkEmail" type="string|null">
+  Link or mailto URL for contacting the user via email
+</ResponseField>
+
+## Usage Example
+
+```php
+// Get current user
+$user = $container->user;
+
+// Check permissions
+if ($user->isAdmin) {
+    // Admin-only actions
+}
+
+if ($user->isGuest) {
+    // Redirect to login
+}
+
+// Get user information
+echo "Welcome, {$user->username}!";
+echo "Title: {$user->title()}";
+echo "Profile: <a href=\"{$user->link}\">{$user->username}</a>";
+
+// Check forum moderator status
+$forum = $container->forums->get(10);
+if ($user->isModerator($forum)) {
+    // Show moderator tools
+}
+
+// Display avatar
+if ($user->avatar) {
+    echo "<img src=\"{$user->avatar}\" alt=\"Avatar\">";
+}
+```
+
+## Constants
+
+The User model uses the following constants for group IDs:
+
+- `FORK_GROUP_GUEST` - Guest user group
+- `FORK_GROUP_UNVERIFIED` - Unverified user group
+- `FORK_GROUP_ADMIN` - Administrator group

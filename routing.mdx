@@ -1,0 +1,417 @@
+---
+title: Routing
+description: URL routing, link generation, and request handling in ForkBB
+icon: 'route'
+---
+
+## Overview
+
+ForkBB's routing system maps URLs to controller actions and generates URLs from route names. It supports:
+
+- **Static routes** (exact URL matches)
+- **Dynamic routes** (with parameters)
+- **HTTP method constraints** (GET, POST, both)
+- **CSRF token integration**
+- **SEO-friendly URLs**
+
+## Router Class
+
+The `Router` class is located at `app/Core/Router.php` and provides routing and link generation:
+
+```php app/Core/Router.php
+class Router
+{
+    const OK = 200;
+    const NOT_FOUND = 404;
+    const METHOD_NOT_ALLOWED = 405;
+    const NOT_IMPLEMENTED = 501;
+
+    const DUO = ['GET', 'POST'];
+    const GET = 'GET';
+    const PST = 'POST';
+    
+    public function __construct(
+        protected string $baseUrl, 
+        protected Csrf $csrf
+    ) {
+        $this->host = \parse_url($baseUrl, \PHP_URL_HOST);
+        $this->prefix = \parse_url($baseUrl, \PHP_URL_PATH) ?? '';
+    }
+    
+    // Add a route
+    public function add(
+        array|string $method, 
+        string $route, 
+        string $handler, 
+        ?string $marker = null
+    ): void
+    
+    // Match a URL to a route
+    public function route(string $method, string $uri): array
+    
+    // Generate a link from a marker
+    public function link(?string $marker = null, array $args = []): string
+}
+```
+
+<Note>
+The Router automatically integrates with the CSRF protection system for secure form handling.
+</Note>
+
+## Defining Routes
+
+Routes are defined in `app/Controllers/Routing.php`:
+
+### Static Routes
+
+Simple URLs with no parameters:
+
+```php app/Controllers/Routing.php
+// Homepage
+$r->add(
+    $r::GET,           // HTTP method
+    '/',               // URL pattern
+    'Index:view',      // Controller:action
+    'Index'            // Route marker (for link generation)
+);
+
+// Login page
+$r->add(
+    $r::DUO,           // Both GET and POST
+    '/login',
+    'Auth:login',
+    'Login'
+);
+```
+
+### Dynamic Routes with Parameters
+
+URLs with variable segments:
+
+```php
+// View a forum with pagination
+$r->add(
+    $r::GET,
+    '/forum/{id|i:[1-9]\d*}/{name}[/{page|i:[1-9]\d*}]',
+    'Forum:view',
+    'Forum'
+);
+
+// Explanation:
+// {id|i:[1-9]\d*}  - Required integer parameter (regex: [1-9]\d*)
+// {name}           - Required string parameter
+// [{page|i:...}]   - Optional integer parameter (in square brackets)
+```
+
+<CodeGroup>
+
+```php User Profile
+// View user profile
+$r->add(
+    $r::GET,
+    '/user/{id|i:[1-9]\d*}/{name}',
+    'ProfileView:view',
+    'User'
+);
+```
+
+```php Topic with Pagination
+// View topic with optional page number
+$r->add(
+    $r::GET,
+    '/topic/{id|i:[1-9]\d*}/{name}[/{page|i:[1-9]\d*}]',
+    'Topic:viewTopic',
+    'Topic'
+);
+```
+
+```php Search with Filters
+// Advanced search with multiple optional parameters
+$r->add(
+    $r::GET,
+    '/search/advanced[/{keywords}/{author}/{forums}/{serch_in:\d}/{sort_by:\d}/{sort_dir:\d}/{show_as:\d}[/{page|i:[1-9]\d*}]]',
+    'Search:viewAdvanced',
+    'SearchAdvanced'
+);
+```
+
+</CodeGroup>
+
+## Parameter Syntax
+
+<ParamField path="{name}" type="string">
+  Required string parameter (matches `[^/\x00-\x1f]+`)
+</ParamField>
+
+<ParamField path="{name:pattern}" type="custom">
+  Required parameter with custom regex pattern
+</ParamField>
+
+<ParamField path="{name|i}" type="integer">
+  Required integer parameter (type hint `i`)
+</ParamField>
+
+<ParamField path="{name|i:pattern}" type="integer">
+  Required integer with custom pattern
+</ParamField>
+
+<ParamField path="[/optional]" type="optional">
+  Optional URL segment (in square brackets)
+</ParamField>
+
+### Examples
+
+| Pattern | Matches | Parameters |
+|---------|---------|------------|
+| `/forum/{id\|i:[1-9]\d*}` | `/forum/123` | `['id' => 123]` |
+| `/user/{id\|i}/{name}` | `/user/5/john` | `['id' => 5, 'name' => 'john']` |
+| `/topic/{id}[/{page\|i}]` | `/topic/42` or `/topic/42/2` | `['id' => '42', 'page' => 1 or 2]` |
+
+## Routing Process
+
+When a request comes in:
+
+<Steps>
+  <Step title="Parse URI">
+    Extract URI from request, remove query string and base path prefix
+  </Step>
+  
+  <Step title="Check Static Routes">
+    Try to match URI against static routes (fastest)
+  </Step>
+  
+  <Step title="Check Dynamic Routes">
+    If no static match, try dynamic routes with regex patterns
+  </Step>
+  
+  <Step title="Extract Parameters">
+    Parse parameters from URL and convert types (integers, strings)
+  </Step>
+  
+  <Step title="Return Route">
+    Return status code, handler, parameters, and marker
+  </Step>
+</Steps>
+
+```php Route matching example
+$route = $r->route('GET', '/forum/123/my-forum/2');
+
+// Returns:
+[
+    Router::OK,              // Status: 200
+    'Forum:view',            // Handler
+    [                        // Parameters
+        'id' => 123,
+        'name' => 'my-forum',
+        'page' => 2
+    ],
+    'Forum'                  // Marker
+]
+```
+
+## Link Generation
+
+Generate URLs from route markers and parameters:
+
+### Basic Link Generation
+
+```php
+// Generate forum link
+$url = $c->Router->link('Forum', [
+    'id' => 123,
+    'name' => 'my-forum'
+]);
+// Result: https://example.com/forum/123/my-forum
+
+// With pagination
+$url = $c->Router->link('Forum', [
+    'id' => 123,
+    'name' => 'my-forum',
+    'page' => 2
+]);
+// Result: https://example.com/forum/123/my-forum/2
+```
+
+### Links with Anchors
+
+```php
+$url = $c->Router->link('Topic', [
+    'id' => 456,
+    'name' => 'discussion',
+    '#' => 'p1234'  // Anchor to post
+]);
+// Result: https://example.com/topic/456/discussion#p1234
+```
+
+### Automatic CSRF Tokens
+
+The router automatically generates CSRF tokens when needed:
+
+```php
+// Route with {token} parameter
+$r->add(
+    $r::GET,
+    '/logout/{token}',
+    'Auth:logout',
+    'Logout'
+);
+
+// Token automatically generated
+$url = $c->Router->link('Logout');
+// Result: https://example.com/logout/abc123...token
+```
+
+<Warning>
+  Links with `{hash}` or `{token}` parameters automatically generate CSRF protection values. Never hardcode these!
+</Warning>
+
+## Conditional Routing
+
+Routes can be conditionally registered based on user permissions:
+
+```php app/Controllers/Routing.php
+$user = $this->c->user;
+$config = $this->c->config;
+
+// Guest-only routes
+if ($user->isGuest) {
+    $r->add($r::DUO, '/login', 'Auth:login', 'Login');
+    
+    if (1 === $config->b_regs_allow) {
+        $r->add($r::GET, '/registration', 'Rules:confirmation', 'Register');
+    }
+}
+
+// Authenticated user routes
+if (!$user->isGuest) {
+    $r->add($r::GET, '/logout/{token}', 'Auth:logout', 'Logout');
+    $r->add($r::DUO, '/post/{id|i:[1-9]\d*}/edit', 'Edit:edit', 'EditPost');
+}
+
+// Admin-only routes
+if ($user->isAdmin) {
+    $r->add($r::GET, '/admin/', 'AdminIndex:index', 'Admin');
+    $r->add($r::DUO, '/admin/options', 'AdminOptions:edit', 'AdminOptions');
+}
+
+// Permission-based routes
+if (1 === $user->g_search) {
+    $r->add($r::GET, '/search', 'Search:view', 'Search');
+}
+```
+
+## Route Validation
+
+Validate and normalize URLs:
+
+```php
+// Validate that a URL belongs to the forum
+$validUrl = $c->Router->validate(
+    $url,              // URL to validate
+    'Index',           // Default marker if invalid
+    []                 // Default args if invalid
+);
+
+// Returns canonical URL or default if invalid
+```
+
+## URL Patterns
+
+### Forums
+
+```
+/                              - Homepage (forum index)
+/forum/{id}/{name}[/{page}]    - View forum
+/forum/{id}/new/topic          - Create new topic
+/forum/{id}/markread/{token}   - Mark forum as read
+```
+
+### Topics
+
+```
+/topic/{id}/{name}[/{page}]    - View topic
+/topic/{id}/view/new           - Jump to first new post
+/topic/{id}/view/last          - Jump to last post
+/topic/{id}/new/reply          - Reply to topic
+```
+
+### Posts
+
+```
+/post/{id}#p{id}               - View specific post
+/post/{id}/edit                - Edit post
+/post/{id}/delete              - Delete post
+/post/{id}/report              - Report post
+```
+
+### Users
+
+```
+/userlist                      - List users
+/user/{id}/{name}              - View profile
+/user/{id}/edit/profile        - Edit profile
+```
+
+### Search
+
+```
+/search                        - Search form
+/search/simple/{keywords}[/{page}]          - Simple search
+/search/advanced[/{params}][/{page}]        - Advanced search
+/search[/user/{uid}]/{action}[/{page}]      - Search actions
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Route Markers">
+    Always provide route markers for link generation. Never hardcode URLs.
+    
+    ```php
+    // Good
+    $link = $c->Router->link('Forum', ['id' => $forum->id]);
+    
+    // Bad
+    $link = "/forum/{$forum->id}";
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate Parameter Types">
+    Use type hints in route patterns to validate parameters.
+    
+    ```php
+    // Ensures id is a positive integer
+    '/forum/{id|i:[1-9]\d*}/{name}'
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle Missing Pages">
+    Optional parameters should have sensible defaults.
+    
+    ```php
+    $page = $args['page'] ?? 1;
+    ```
+  </Accordion>
+  
+  <Accordion title="Use SEO-Friendly Names">
+    Include human-readable slugs in URLs.
+    
+    ```php
+    $c->Router->link('Forum', [
+        'id' => $forum->id,
+        'name' => $c->Func->friendly($forum->forum_name)
+    ]);
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Controllers" icon="gears" href="/controllers">
+    Learn how controllers handle routes
+  </Card>
+  <Card title="Models" icon="database" href="/models">
+    Work with data in your controllers
+  </Card>
+</CardGroup>

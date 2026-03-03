@@ -1,0 +1,604 @@
+---
+title: Moderation Tools
+description: Content moderation, user bans, reports, and administrative controls in ForkBB
+icon: shield
+---
+
+## Overview
+
+ForkBB provides comprehensive moderation tools to help administrators and moderators maintain forum quality and enforce community guidelines. The system includes user bans, content reports, premoderation, and granular permission controls.
+
+## Moderation Roles
+
+<CardGroup cols={3}>
+  <Card title="Administrators" icon="crown">
+    Full system access with all permissions
+  </Card>
+  
+  <Card title="Global Moderators" icon="shield">
+    Can moderate all forums
+  </Card>
+  
+  <Card title="Forum Moderators" icon="user-shield">
+    Moderate specific forums only
+  </Card>
+</CardGroup>
+
+## Permission Checks
+
+### Administrator Status
+
+```php app/Models/User/User.php
+protected function getisAdmin(): bool
+{
+    return FORK_GROUP_ADMIN === $this->group_id;
+}
+
+protected function getisAdmMod(): bool
+{
+    return $this->isAdmin
+        || 1 === $this->g_moderator;
+}
+```
+
+### Forum-Specific Moderation
+
+```php app/Models/User/User.php
+public function isModerator(Model $model): bool
+{
+    if (1 !== $this->g_moderator) {
+        return false;
+    }
+    
+    while (! $model instanceof Forum) {
+        $model = $model->parent;
+        
+        if (! $model instanceof Model) {
+            throw new RuntimeException('Moderator\'s rights can not be found');
+        }
+    }
+    
+    return isset($model->moderators[$this->id]);
+}
+```
+
+<Info>
+  Moderator permissions are checked hierarchically. Topics inherit permissions from their parent forum.
+</Info>
+
+## Ban System
+
+The ban system is implemented in `app/Models/BanList/BanList.php:17` and supports multiple ban types:
+
+### Ban Types
+
+<Tabs>
+  <Tab title="Username Bans">
+    Ban specific usernames (case-insensitive):
+    
+    ```php app/Models/BanList/BanList.php
+    public function banFromName(?string $name): int
+    {
+        $name = $this->trimToNull($name, true);
+        
+        if (null === $name) {
+            throw new InvalidArgumentException('Expected username, not empty string');
+        }
+        
+        return $this->userList[$name] ?? 0;
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Email Bans">
+    Block email addresses or domains:
+    
+    - Full email: `user@example.com`
+    - Domain: `*@example.com`
+    - Pattern: `*spam*@*`
+  </Tab>
+  
+  <Tab title="IP Bans">
+    Ban by IP address or range:
+    
+    - Single IP: `192.168.1.100`
+    - IPv4 range: `192.168.1.*`
+    - IPv6: `2001:0db8:85a3::8a2e:0370:7334`
+    - IPv6 range: `2001:0db8:85a3::*`
+  </Tab>
+</Tabs>
+
+### Ban Initialization
+
+```php app/Models/BanList/BanList.php
+const CACHE_KEY = 'banlist';
+
+public function init(): BanList
+{
+    $list = $this->c->Cache->get(self::CACHE_KEY);
+    
+    if (! isset($list['banList'], $list['userList'], $list['emailList'], $list['ipList'], $list['firstExpire'])) {
+        $list = $this->load();
+        
+        if (true !== $this->c->Cache->set(self::CACHE_KEY, $list)) {
+            throw new RuntimeException('Unable to write value to cache - ' . self::CACHE_KEY);
+        }
+    }
+    
+    $this->banList     = $list['banList'];
+    $this->userList    = $list['userList'];
+    $this->emailList   = $list['emailList'];
+    $this->ipList      = $list['ipList'];
+    $this->firstExpire = $list['firstExpire'];
+    
+    return $this;
+}
+```
+
+<Note>
+  Ban lists are cached for performance. Clear the cache after modifying bans.
+</Note>
+
+### IP Address Handling
+
+IP addresses are converted to hexadecimal for efficient storage and comparison:
+
+```php app/Models/BanList/BanList.php
+public function ip2hex(string $ip): string
+{
+    $bin = \inet_pton($ip);
+    
+    if (false === $bin) {
+        if (\preg_match('%[:a-fA-F]|\d{4}%', $ip)) {
+            $result = '';
+            // 0000-ffff for IPv6
+            foreach (\explode(':', $ip) as $cur) {
+                $result .= \substr('0000' . \strtolower($cur), -4);
+            }
+        } else {
+            $result = '-';
+            // 00-ff for IPv4
+            foreach (\explode('.', $ip) as $cur) {
+                $result .= \sprintf('%02x', $cur);
+            }
+        }
+        
+        return $result;
+    } else {
+        // The hyphen is needed for joint sorting of IPv4 and IPv6
+        return (isset($bin[4]) ? '' : '-') . \bin2hex($bin);
+    }
+}
+```
+
+### Ban Checking
+
+```php app/Models/User/User.php
+protected function getisBanByName(): bool
+{
+    return ! $this->isAdmin
+        && $this->c->bans->banFromName($this->username) > 0;
+}
+```
+
+<Warning>
+  Administrators cannot be banned. Ban checks are bypassed for admin accounts.
+</Warning>
+
+### Ban Cache Management
+
+```php app/Models/BanList/BanList.php
+public function reset(): BanList
+{
+    if (true !== $this->c->Cache->delete(self::CACHE_KEY)) {
+        throw new RuntimeException('Unable to remove key from cache - ' . self::CACHE_KEY);
+    }
+    
+    return $this;
+}
+```
+
+## Content Reports
+
+Users can report inappropriate content for moderator review, implemented in `app/Models/Report/Report.php:18`.
+
+### Report Structure
+
+```php app/Models/Report/Report.php
+protected function setauthor(User $user): void
+{
+    if ($user->isGuest) {
+        throw new RuntimeException('Bad author');
+    }
+    
+    $this->reported_by = $user->id;
+}
+
+protected function getauthor(): User
+{
+    if (
+        $this->reported_by < 1
+        || ! ($user = $this->c->users->load($this->reported_by)) instanceof User
+    ) {
+        $user = $this->c->users->guest([
+            'username' => '{User #' . $this->reported_by .'}',
+        ]);
+    }
+    
+    if (! $user instanceof User) {
+        throw new RuntimeException('No author data');
+    }
+    
+    return $user;
+}
+```
+
+### Report Post Association
+
+```php app/Models/Report/Report.php
+protected function setpost(Post $post): void
+{
+    if ($post->id < 1) {
+        throw new RuntimeException('Bad post');
+    }
+    
+    $this->post_id = $post->id;
+}
+
+protected function getpost(): ?Post
+{
+    if ($this->post_id < 1) {
+        throw new RuntimeException('No post data');
+    }
+    
+    return $this->c->posts->load($this->post_id);
+}
+```
+
+### Report Resolution
+
+```php app/Models/Report/Report.php
+protected function setmarker(User $user): void
+{
+    if (! empty($this->zapped_by)) {
+        throw new RuntimeException('Report already has a marker');
+    } elseif ($user->isGuest) {
+        throw new RuntimeException('Bad marker');
+    }
+    
+    $this->zapped_by = $user->id;
+    $this->zapped    = \time();
+}
+
+protected function getmarker(): User
+{
+    if (
+        $this->zapped_by < 1
+        || ! ($user = $this->c->users->load($this->zapped_by)) instanceof User
+    ) {
+        $user = $this->c->users->guest([
+            'username' => '{User #' . $this->zapped_by .'}',
+        ]);
+    }
+    
+    if (! $user instanceof User) {
+        throw new RuntimeException('No marker data');
+    }
+    
+    return $user;
+}
+
+public function getlinkZap(): string
+{
+    if (empty($this->zapped)) {
+        return $this->c->Router->link(
+            'AdminReportsZap',
+            [
+                'id' => $this->id,
+            ]
+        );
+    } else {
+        return '';
+    }
+}
+```
+
+<Info>
+  Reports track both the reporting user and the moderator who resolved it.
+</Info>
+
+## User Promotion
+
+Moderators can promote users based on activity:
+
+```php app/Models/User/User.php
+public function linkPromote(Post $post): ?string
+{
+    if (
+        (
+            $this->isAdmin
+            || (
+                $this->isAdmMod
+                && 1 === $this->g_mod_promote_users
+            )
+        )
+        && $this->id !== $post->user->id
+        && 0 < $post->user->g_promote_min_posts * $post->user->g_promote_next_group
+        && ! $post->user->isBanByName
+    ) {
+        return $this->c->Router->link(
+            'AdminUserPromote',
+            [
+                'uid' => $post->user->id,
+                'pid' => $post->id,
+            ]
+        );
+    } else {
+        return null;
+    }
+}
+```
+
+### Promotion Requirements
+
+<Steps>
+  <Step title="Permission Check">
+    User must be admin or have `g_mod_promote_users` permission
+  </Step>
+  
+  <Step title="Not Self">
+    Cannot promote yourself
+  </Step>
+  
+  <Step title="Promotion Configured">
+    Target user must have promotion settings configured
+  </Step>
+  
+  <Step title="Not Banned">
+    Target user must not be banned
+  </Step>
+</Steps>
+
+## Moderator Assignment
+
+Forums can have assigned moderators:
+
+```php app/Models/Forum/Forum.php
+public function modAdd(User ...$users): void
+{
+    $attr = $this->getModelAttr('moderators');
+    
+    if (
+        empty($attr)
+        || ! \is_array($attr)
+    ) {
+        $attr = [];
+    }
+    
+    foreach ($users as $user) {
+        if (! $user instanceof User) {
+            throw new InvalidArgumentException('Expected User');
+        }
+        
+        $attr[$user->id] = $user->username;
+    }
+    
+    $this->moderators = $attr;
+}
+
+public function modDelete(User ...$users): void
+{
+    $attr = $this->getModelAttr('moderators');
+    
+    if (
+        empty($attr)
+        || ! \is_array($attr)
+    ) {
+        return;
+    }
+    
+    foreach ($users as $user) {
+        if (! $user instanceof User) {
+            throw new InvalidArgumentException('Expected User');
+        }
+        
+        unset($attr[$user->id]);
+    }
+    
+    $this->moderators = $attr;
+}
+```
+
+## Content Control
+
+### Topic Management
+
+<CardGroup cols={2}>
+  <Card title="Lock/Unlock" icon="lock">
+    Prevent or allow new replies
+  </Card>
+  
+  <Card title="Sticky/Unsticky" icon="thumbtack">
+    Pin topics to the top of forums
+  </Card>
+  
+  <Card title="Move Topics" icon="arrows">
+    Relocate topics between forums
+  </Card>
+  
+  <Card title="Merge Topics" icon="code-merge">
+    Combine related discussions
+  </Card>
+</CardGroup>
+
+### Post Management
+
+- **Edit Posts**: Moderators can edit any post
+- **Delete Posts**: Soft or hard delete inappropriate content
+- **Merge Posts**: Combine consecutive posts from same user
+- **Split Topics**: Extract posts into new topic
+
+## Premoderation
+
+New posts can require approval before appearing:
+
+<Info>
+  Premoderation is typically applied to new users or users with low post counts to prevent spam.
+</Info>
+
+## Censorship
+
+Automatic word filtering:
+
+```php
+// app/Models/Censorship/Censorship.php
+// Filters inappropriate words
+// Applies to posts, signatures, and usernames
+```
+
+Censored words can be:
+- Replaced with asterisks
+- Replaced with custom text
+- Used to trigger moderation flags
+
+## Admin Lists
+
+Track and display admin/moderator activity:
+
+```php
+// app/Models/AdminList/AdminList.php
+// Shows recent admin actions
+// Audit trail for accountability
+```
+
+## Moderation Best Practices
+
+<AccordionGroup>
+  <Accordion title="Clear Guidelines">
+    Establish and communicate clear community guidelines. Document what is and isn't acceptable behavior.
+  </Accordion>
+  
+  <Accordion title="Consistent Enforcement">
+    Apply rules consistently across all users. Document ban reasons and durations.
+  </Accordion>
+  
+  <Accordion title="Multiple Moderators">
+    Assign moderators to specific forums they're knowledgeable about. Distribute workload.
+  </Accordion>
+  
+  <Accordion title="Progressive Discipline">
+    Start with warnings, then temporary bans, before permanent bans. Give users chances to improve.
+  </Accordion>
+  
+  <Accordion title="Report Review">
+    Review reports promptly. Thank users who submit valid reports to encourage community policing.
+  </Accordion>
+  
+  <Accordion title="Ban Documentation">
+    Document ban reasons, evidence, and duration. This helps with appeals and consistency.
+  </Accordion>
+</AccordionGroup>
+
+## Moderation Workflow
+
+<Steps>
+  <Step title="Report Submitted">
+    User reports inappropriate content via report button
+  </Step>
+  
+  <Step title="Moderator Review">
+    Moderator reviews reported content and context
+  </Step>
+  
+  <Step title="Action Taken">
+    Edit, delete, or leave content; warn or ban user if needed
+  </Step>
+  
+  <Step title="Report Resolved">
+    Mark report as handled with resolution notes
+  </Step>
+  
+  <Step title="User Notification">
+    Optionally notify user of action taken
+  </Step>
+</Steps>
+
+## Permission Hierarchy
+
+```
+Administrators (Full Access)
+│
+├─ Global Moderators (All Forums)
+│  ├─ Edit/Delete any post
+│  ├─ Lock/Move/Merge topics
+│  ├─ Ban users (if configured)
+│  └─ View reports
+│
+└─ Forum Moderators (Specific Forums)
+   ├─ Edit/Delete posts in assigned forums
+   ├─ Lock/Move topics within permission
+   └─ View reports for their forums
+```
+
+## IP Tracking
+
+Track user IP addresses for ban enforcement and investigation:
+
+- Login IP tracking
+- Post IP tracking  
+- IP-based duplicate account detection
+- Proxy/VPN detection (if configured)
+
+<Warning>
+  IP tracking raises privacy concerns. Ensure compliance with local privacy laws and disclose tracking in your privacy policy.
+</Warning>
+
+## Bulk Moderation
+
+Perform actions on multiple items:
+
+- Delete multiple posts at once
+- Move multiple topics
+- Ban multiple users (spam cleanup)
+- Prune old topics
+
+## Moderation Statistics
+
+Track moderation activity:
+
+- Reports handled per moderator
+- Average report resolution time
+- Ban statistics
+- Deleted content counts
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/features/user-management">
+    User accounts, groups, and permissions
+  </Card>
+  
+  <Card title="Forums & Topics" icon="comments" href="/features/forums-topics">
+    Content structure and organization
+  </Card>
+</CardGroup>
+
+## Security Considerations
+
+<AccordionGroup>
+  <Accordion title="Moderator Account Security">
+    Enforce strong passwords for moderators. Enable 2FA if available. Regularly audit moderator actions.
+  </Accordion>
+  
+  <Accordion title="Ban Evasion">
+    Combine username, email, and IP bans. Monitor for patterns of ban evasion. Consider device fingerprinting.
+  </Accordion>
+  
+  <Accordion title="False Reports">
+    Track users who submit false reports. Take action against abuse of the report system.
+  </Accordion>
+  
+  <Accordion title="Moderator Abuse">
+    Log all moderation actions. Provide appeal process. Remove moderators who abuse privileges.
+  </Accordion>
+</AccordionGroup>

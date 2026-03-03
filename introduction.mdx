@@ -1,0 +1,144 @@
+---
+title: Introduction to ForkBB
+description: A modern, free and open source forum software built on PHP with MVC architecture
+---
+
+# Welcome to ForkBB
+
+ForkBB is a **free and open source forum software** that provides a modern, secure platform for building online communities. Based on [FluxBB_by_Visman](https://github.com/MioVisman/FluxBB_by_Visman), ForkBB combines simplicity with powerful features to deliver a robust forum experience.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Get started with ForkBB installation on Apache or Nginx
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration">
+    Configure database, security, and core settings
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Learn about ForkBB's MVC architecture and design patterns
+  </Card>
+  <Card title="Extensions" icon="puzzle-piece" href="/extensions/overview">
+    Extend ForkBB with custom plugins and features
+  </Card>
+</CardGroup>
+
+## What is ForkBB?
+
+ForkBB is a PHP-based forum application designed with modern web development practices. It features a clean MVC architecture, dependency injection container, and a flexible routing system that makes it both developer-friendly and easy to customize.
+
+The project is actively maintained and released under the MIT license, giving you complete freedom to use, modify, and distribute the software for any purpose.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Modern architecture" icon="cube">
+    Built on MVC principles with dependency injection for clean, maintainable code
+  </Card>
+  <Card title="Multi-database support" icon="database">
+    Works with MySQL 5.5.3+, PostgreSQL 10+, and SQLite 3.25+
+  </Card>
+  <Card title="Private messaging" icon="envelope">
+    Built-in PM system for member-to-member communication
+  </Card>
+  <Card title="OAuth authentication" icon="key">
+    Support for GitHub, Google, and Yandex OAuth providers
+  </Card>
+  <Card title="BBCode parser" icon="code">
+    Flexible BBCode system with custom tag support
+  </Card>
+  <Card title="Full-text search" icon="magnifying-glass">
+    Powerful search across topics, posts, and forums
+  </Card>
+  <Card title="Moderation tools" icon="shield">
+    Comprehensive moderation features with reporting system
+  </Card>
+  <Card title="Extension system" icon="plug">
+    Extend functionality with plugins and custom extensions
+  </Card>
+  <Card title="User groups & permissions" icon="users">
+    Fine-grained permission control with group management
+  </Card>
+  <Card title="Friendly URLs" icon="link">
+    SEO-friendly URL routing with customizable patterns
+  </Card>
+  <Card title="Security headers" icon="lock">
+    Built-in CSP, X-Frame-Options, and other security headers
+  </Card>
+  <Card title="Template system" icon="palette">
+    Flexible templating with support for multiple themes
+  </Card>
+</CardGroup>
+
+## Why choose ForkBB?
+
+### Developer-friendly
+
+ForkBB follows modern PHP development practices with PSR standards, namespace support, and a clean dependency injection container. The codebase is well-organized and easy to understand, making customization straightforward.
+
+### Secure by default
+
+Security is built into ForkBB's core with features like:
+
+- Content Security Policy headers
+- CSRF protection
+- HMAC-based security tokens
+- SQL injection prevention through PDO
+- XSS protection
+
+### Flexible and extensible
+
+The extension system allows you to add new features without modifying core files. Hook into events, add custom routes, or create new models to extend functionality.
+
+### Performance-optimized
+
+ForkBB includes file-based caching, optimized database queries, and support for CDN integration to ensure your forum runs smoothly even with high traffic.
+
+## Requirements
+
+Before installing ForkBB, ensure your server meets these requirements:
+
+- **PHP 8.0 or higher**
+- **Required PHP extensions:**
+  - `pdo` - Database connectivity
+  - `intl` - Internationalization
+  - `json` - JSON processing
+  - `mbstring` - Multi-byte string handling
+  - `fileinfo` - File type detection
+
+- **Recommended PHP extensions:**
+  - `imagick` or `gd` - For image upload and avatar processing
+  - `openssl` - For SMTP with SSL/TLS
+  - `curl` - For OAuth authentication
+
+- **Database:**
+  - MySQL 5.5.3+ (with mysqlnd driver)
+  - PostgreSQL 10+
+  - SQLite 3.25+
+
+## Get started
+
+<Steps>
+  <Step title="Install ForkBB">
+    Follow the [installation guide](/installation) to set up ForkBB on your server
+  </Step>
+  <Step title="Configure your forum">
+    Set up database, cookies, and security settings in the [configuration file](/configuration)
+  </Step>
+  <Step title="Learn the architecture">
+    Understand ForkBB's structure by reading the [architecture documentation](/architecture)
+  </Step>
+  <Step title="Customize and extend">
+    Build custom features using the [extension system](/extensions/overview)
+  </Step>
+</Steps>
+
+## Community and support
+
+- **Homepage:** [https://forkbb.ru/](https://forkbb.ru/)
+- **GitHub:** [https://github.com/forkbb/forkbb](https://github.com/forkbb/forkbb)
+- **License:** MIT License
+- **Author:** Visman ([mio.visman@yandex.ru](mailto:mio.visman@yandex.ru))
+
+## Next steps
+
+Ready to get started? Head over to the [installation guide](/installation) to begin setting up your ForkBB forum.

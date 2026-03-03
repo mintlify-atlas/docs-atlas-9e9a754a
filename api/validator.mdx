@@ -1,0 +1,773 @@
+---
+title: Validator
+description: Form validation, input sanitization, and error handling
+---
+
+The `Validator` class provides comprehensive form validation with built-in rules, custom validators, nested array validation, and detailed error reporting.
+
+## Overview
+
+The Validator offers:
+- **Built-in Rules** - 20+ validation rules for common scenarios
+- **Custom Validators** - Extend with your own validation logic
+- **Nested Validation** - Validate complex array structures
+- **Error Management** - Detailed error messages with field aliases
+- **CSRF Integration** - Automatic token validation
+- **Type Coercion** - Convert and sanitize input types
+
+<Note>
+Access via Container: `$this->c->Validator` (creates new instance each time)
+</Note>
+
+## Basic Usage
+
+### Validation Workflow
+
+```php
+// 1. Get validator instance
+$v = $this->c->Validator;
+
+// 2. Add validation rules
+$v->addRules([
+    'username' => 'required|string:trim|min:3|max:25',
+    'email'    => 'required|string:trim,lower|email',
+    'age'      => 'required|integer|min:18|max:120'
+]);
+
+// 3. Validate data
+$valid = $v->validation($_POST);
+
+if ($valid) {
+    // Get validated data
+    $data = $v->getData();
+    // Use $data['username'], $data['email'], etc.
+} else {
+    // Get errors
+    $errors = $v->getErrors();
+}
+```
+
+## Adding Rules
+
+### addRules
+
+```php
+public function addRules(array $list): Validator
+```
+
+Defines validation rules for fields.
+
+<ParamField path="list" type="array" required>
+  Array mapping field names to rules. Rules can be pipe-separated strings or arrays.
+</ParamField>
+
+<ResponseField name="return" type="Validator">
+  Returns self for method chaining.
+</ResponseField>
+
+**String Format:**
+
+```php
+$v->addRules([
+    'username' => 'required|string:trim|min:3|max:25',
+    'password' => 'required|string|min:8',
+    'age'      => 'integer|min:18'
+]);
+```
+
+**Array Format:**
+
+```php
+$v->addRules([
+    'email' => [
+        'required',
+        'string' => 'trim,lower',
+        'regex'  => '/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i'
+    ],
+    'role' => [
+        'required',
+        'in' => ['user', 'moderator', 'admin']
+    ]
+]);
+```
+
+**Nested Arrays:**
+
+```php
+$v->addRules([
+    'profile.name'    => 'required|string:trim',
+    'profile.bio'     => 'string:trim|max:500',
+    'tags.*'          => 'string:trim|max:50',  // Validate each tag
+    'permissions.*.id' => 'required|integer'
+]);
+```
+
+## Built-in Validation Rules
+
+### Required Rules
+
+<ParamField path="required" type="rule">
+  Field must be present and not empty.
+  ```php
+  'username' => 'required'
+  ```
+</ParamField>
+
+<ParamField path="required_with" type="rule">
+  Field required if any specified fields are present.
+  ```php
+  'state' => 'required_with:city,zipcode'
+  ```
+</ParamField>
+
+<ParamField path="exist" type="rule">
+  Field must exist (allows empty values).
+  ```php
+  'optional_field' => 'exist'
+  ```
+</ParamField>
+
+<ParamField path="absent" type="rule">
+  Field must not be present. Optionally sets default value.
+  ```php
+  'hidden_field' => 'absent:default_value'
+  ```
+</ParamField>
+
+### Type Rules
+
+<ParamField path="string" type="rule">
+  Validates and transforms string values.
+  
+  **Actions:**
+  - `trim` - Remove whitespace
+  - `lower` - Convert to lowercase
+  - `spaces` - Collapse multiple spaces
+  - `linebreaks` - Normalize line endings
+  - `null` - Convert empty to null
+  - `empty` - Stop validation if empty
+  
+  ```php
+  'email' => 'string:trim,lower'
+  'bio'   => 'string:trim,linebreaks,spaces'
+  ```
+</ParamField>
+
+<ParamField path="integer" type="rule">
+  Value must be integer or numeric string.
+  ```php
+  'age' => 'integer'
+  // Input: "25" → Output: 25 (int)
+  ```
+</ParamField>
+
+<ParamField path="numeric" type="rule">
+  Value must be numeric (int or float).
+  ```php
+  'price' => 'numeric'
+  // Input: "19.99" → Output: 19.99 (float)
+  ```
+</ParamField>
+
+<ParamField path="array" type="rule">
+  Value must be array. Can specify nested validation.
+  ```php
+  'settings' => [
+      'array' => [
+          'theme'    => 'required|string',
+          'language' => 'required|in:en,ru,de'
+      ]
+  ]
+  ```
+</ParamField>
+
+<ParamField path="checkbox" type="rule">
+  Validates checkbox input (converts to boolean).
+  ```php
+  'accept_terms' => 'checkbox'
+  // Checked: string value → true
+  // Unchecked: null → false
+  ```
+</ParamField>
+
+### Constraint Rules
+
+<ParamField path="min" type="rule">
+  Minimum value/length/count.
+  
+  **For strings:** Character count (or bytes with "bytes" suffix)
+  ```php
+  'username' => 'min:3'        // Min 3 characters
+  'password' => 'min:8 bytes'  // Min 8 bytes
+  ```
+  
+  **For numbers:** Minimum value
+  ```php
+  'age' => 'integer|min:18'
+  ```
+  
+  **For arrays:** Minimum elements
+  ```php
+  'tags' => 'array|min:2'
+  ```
+</ParamField>
+
+<ParamField path="max" type="rule">
+  Maximum value/length/count. Same usage as `min`.
+  ```php
+  'bio' => 'string|max:500'
+  'rating' => 'integer|max:5'
+  'files' => 'file:multiple|max:2048'  // 2MB per file
+  ```
+</ParamField>
+
+<ParamField path="in" type="rule">
+  Value must be in list.
+  ```php
+  'role' => 'in:user,moderator,admin'
+  // Or array format:
+  'role' => ['in' => ['user', 'moderator', 'admin']]
+  ```
+</ParamField>
+
+<ParamField path="not_in" type="rule">
+  Value must NOT be in list.
+  ```php
+  'username' => 'not_in:admin,root,system'
+  ```
+</ParamField>
+
+<ParamField path="same" type="rule">
+  Value must match another field.
+  ```php
+  'password_confirm' => 'required|same:password'
+  ```
+</ParamField>
+
+### Pattern Rules
+
+<ParamField path="regex" type="rule">
+  Value must match regex pattern.
+  ```php
+  'zipcode' => 'regex:/^\d{5}(-\d{4})?$/'
+  'slug'    => 'regex:/^[a-z0-9-]+$/'
+  ```
+</ParamField>
+
+<ParamField path="password" type="rule">
+  Password format validation (must contain space with non-space on both sides).
+  ```php
+  'passphrase' => 'required|password'
+  ```
+</ParamField>
+
+### File Rules
+
+<ParamField path="file" type="rule">
+  Validates uploaded files.
+  
+  **Single file:**
+  ```php
+  'avatar' => 'file|max:1024'  // Max 1MB
+  ```
+  
+  **Multiple files:**
+  ```php
+  'attachments' => 'file:multiple|max:2048'
+  ```
+</ParamField>
+
+<ParamField path="image" type="rule">
+  Validates uploaded image files.
+  ```php
+  'photo' => 'image|max:5120'  // Max 5MB
+  'gallery' => 'image:multiple|max:2048'
+  ```
+</ParamField>
+
+### Special Rules
+
+<ParamField path="token" type="rule">
+  Validates CSRF token.
+  ```php
+  'token' => 'token:EditUserProfile'
+  // With custom lifetime (seconds)
+  'token' => 'token:3600:EditUserProfile'
+  ```
+</ParamField>
+
+<ParamField path="referer" type="rule">
+  Validates and sanitizes referrer URL.
+  ```php
+  'redirect' => 'referer:Index'
+  ```
+</ParamField>
+
+<ParamField path="date" type="rule">
+  Validates date format.
+  ```php
+  'birthdate' => 'date'
+  ```
+</ParamField>
+
+## Validation Execution
+
+### validation
+
+```php
+public function validation(array $raw, bool $strict = false): bool
+```
+
+Validates data against defined rules.
+
+<ParamField path="raw" type="array" required>
+  Raw input data (typically `$_POST` or `$_GET`).
+</ParamField>
+
+<ParamField path="strict" type="bool" default="false">
+  If true, fails validation when input contains extra fields not in rules.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  True if validation passes, false otherwise.
+</ResponseField>
+
+**Example:**
+
+```php
+$v->addRules([
+    'username' => 'required|string:trim|min:3',
+    'email'    => 'required|string:trim,lower'
+]);
+
+// Normal validation (ignores extra fields)
+$valid = $v->validation($_POST);
+
+// Strict validation (fails if $_POST has extra fields)
+$valid = $v->validation($_POST, true);
+```
+
+### getData
+
+```php
+public function getData(bool $all = false, array $doNotUse = []): array
+```
+
+Retrieves validated data.
+
+<ParamField path="all" type="bool" default="false">
+  Include null values (fields that failed validation or are optional).
+</ParamField>
+
+<ParamField path="doNotUse" type="array" default="[]">
+  List of field names to exclude from result.
+</ParamField>
+
+<ResponseField name="return" type="array">
+  Validated and sanitized data.
+</ResponseField>
+
+**Example:**
+
+```php
+// Get only non-null values
+$data = $v->getData();
+
+// Get all values including null
+$data = $v->getData(true);
+
+// Exclude sensitive fields
+$data = $v->getData(false, ['password', 'token']);
+```
+
+### getStatus
+
+```php
+public function getStatus(string $field): bool
+```
+
+Checks if a specific field passed validation.
+
+<ParamField path="field" type="string" required>
+  Field name.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  True if field is valid.
+</ResponseField>
+
+**Example:**
+
+```php
+if ($v->getStatus('email')) {
+    // Email is valid
+    $email = $v->email;
+}
+```
+
+## Error Handling
+
+### getErrors
+
+```php
+public function getErrors(): array
+```
+
+Returns all validation errors grouped by type.
+
+<ResponseField name="return" type="array">
+  Array of errors grouped by message type (FORK_MESS_VLD, FORK_MESS_ERR, etc.).
+</ResponseField>
+
+**Example:**
+
+```php
+$errors = $v->getErrors();
+// [
+//     'v' => [  // FORK_MESS_VLD (validation errors)
+//         ['The :alias is required', [':alias' => 'Username']],
+//         ['The :alias maximum is :attr characters', [':alias' => 'Email', ':attr' => '100']]
+//     ],
+//     'e' => [  // FORK_MESS_ERR (error messages)
+//         ['Bad token', []]
+//     ]
+// ]
+```
+
+### getErrorsWithoutType
+
+```php
+public function getErrorsWithoutType(): array
+```
+
+Returns errors without type grouping.
+
+<ResponseField name="return" type="array">
+  Flat array of all error messages.
+</ResponseField>
+
+**Example:**
+
+```php
+$errors = $v->getErrorsWithoutType();
+// [
+//     ['The :alias is required', [':alias' => 'Username']],
+//     ['The :alias maximum is :attr characters', [':alias' => 'Email', ':attr' => '100']],
+//     ['Bad token', []]
+// ]
+```
+
+## Customization
+
+### addMessages
+
+```php
+public function addMessages(array $messages): Validator
+```
+
+Customizes error messages for fields or rules.
+
+<ParamField path="messages" type="array" required>
+  Array mapping "field.rule" or "field" to custom message.
+</ParamField>
+
+<ResponseField name="return" type="Validator">
+  Returns self for method chaining.
+</ResponseField>
+
+**Example:**
+
+```php
+$v->addMessages([
+    'username.required' => 'Please enter your username',
+    'username.min'      => 'Username must be at least 3 characters',
+    'email'             => 'Please enter a valid email address',
+    'password'          => ['e', 'Invalid password format']  // Custom type
+]);
+```
+
+### addAliases
+
+```php
+public function addAliases(array $aliases): Validator
+```
+
+Defines friendly field names for error messages.
+
+<ParamField path="aliases" type="array" required>
+  Array mapping field names to display names.
+</ParamField>
+
+<ResponseField name="return" type="Validator">
+  Returns self for method chaining.
+</ResponseField>
+
+**Example:**
+
+```php
+$v->addAliases([
+    'username'     => 'Username',
+    'email'        => 'Email Address',
+    'profile.name' => 'Full Name',
+    'accept_terms' => 'Terms of Service'
+]);
+
+// Error will show: "The Email Address is required"
+// Instead of: "The email is required"
+```
+
+### addArguments
+
+```php
+public function addArguments(array $arguments): Validator
+```
+
+Provides additional arguments to validators.
+
+<ParamField path="arguments" type="array" required>
+  Array mapping "field.rule" or "field" to arguments.
+</ParamField>
+
+<ResponseField name="return" type="Validator">
+  Returns self for method chaining.
+</ResponseField>
+
+**Example:**
+
+```php
+$v->addArguments([
+    'token.token' => ['id' => $userId],
+    'referer.referer' => ['forum_id' => $forumId]
+]);
+```
+
+### addValidators
+
+```php
+public function addValidators(array $validators): Validator
+```
+
+Registers custom validation rules.
+
+<ParamField path="validators" type="array" required>
+  Array mapping rule names to callable validators.
+</ParamField>
+
+<ResponseField name="return" type="Validator">
+  Returns self for method chaining.
+</ResponseField>
+
+**Example:**
+
+```php
+$v->addValidators([
+    'username_available' => function($v, $value, $attr) {
+        $exists = $this->c->DB->query(
+            'SELECT 1 FROM ::users WHERE username = ?s',
+            [$value]
+        )->fetch();
+        
+        if ($exists) {
+            $v->addError('Username already taken');
+        }
+        
+        return $value;
+    }
+]);
+
+$v->addRules([
+    'username' => 'required|string:trim|username_available'
+]);
+```
+
+## Real-World Examples
+
+### User Registration Form
+
+```php
+$v = $this->c->Validator;
+
+$v->addRules([
+    'username' => 'required|string:trim|min:3|max:25',
+    'email'    => 'required|string:trim,lower|regex:/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i',
+    'password' => 'required|string|min:8',
+    'password_confirm' => 'required|same:password',
+    'accept_terms' => 'required|checkbox',
+    'token' => 'required|token:Register'
+])->addAliases([
+    'username' => 'Username',
+    'email'    => 'Email Address',
+    'password' => 'Password',
+    'password_confirm' => 'Password Confirmation',
+    'accept_terms' => 'Terms of Service'
+])->addMessages([
+    'accept_terms.required' => 'You must accept the Terms of Service'
+]);
+
+if ($v->validation($_POST)) {
+    $data = $v->getData(false, ['password_confirm', 'token']);
+    // Create user with $data['username'], $data['email'], $data['password']
+} else {
+    $errors = $v->getErrors();
+}
+```
+
+### Profile Update
+
+```php
+$v = $this->c->Validator;
+
+$v->addRules([
+    'profile.name'     => 'required|string:trim|max:100',
+    'profile.bio'      => 'string:trim,linebreaks,spaces|max:1000',
+    'profile.location' => 'string:trim|max:100',
+    'profile.website'  => 'string:trim|regex:/^https?:\\/\\/.+$/i',
+    'settings.theme'   => 'required|in:light,dark,auto',
+    'settings.language' => 'required|in:en,ru,de,fr',
+    'settings.timezone' => 'required|string',
+    'token' => 'required|token:EditUserProfile',
+])->addArguments([
+    'token.token' => ['id' => $user->id]
+]);
+
+if ($v->validation($_POST)) {
+    $data = $v->getData();
+    // Update user profile and settings
+}
+```
+
+### File Upload
+
+```php
+$v = $this->c->Validator;
+
+$v->addRules([
+    'avatar' => 'required|image|max:2048',  // Max 2MB
+    'title'  => 'required|string:trim|max:200',
+    'token'  => 'required|token:UploadAvatar'
+]);
+
+if ($v->validation($_POST + $_FILES)) {
+    $data = $v->getData();
+    $file = $data['avatar'];  // File object
+    // Process upload
+}
+```
+
+### Search Form
+
+```php
+$v = $this->c->Validator;
+
+$v->addRules([
+    'keywords' => 'string:trim|min:3|max:100',
+    'author'   => 'string:trim|max:50',
+    'forums'   => 'array',
+    'forums.*' => 'integer',
+    'sort_by'  => 'in:relevance,date,author',
+    'page'     => 'integer|min:1'
+]);
+
+if ($v->validation($_GET)) {
+    $data = $v->getData();
+    // Perform search with filters
+}
+```
+
+### Nested Array Validation
+
+```php
+$v = $this->c->Validator;
+
+$v->addRules([
+    'post.title'   => 'required|string:trim|max:200',
+    'post.content' => 'required|string:trim,linebreaks|min:10',
+    'tags'         => 'array|max:5',
+    'tags.*'       => 'string:trim|max:50',
+    'attachments'  => 'file:multiple|max:10240',
+    'poll.question' => 'string:trim|max:200',
+    'poll.options'  => 'array|min:2|max:10',
+    'poll.options.*' => 'string:trim|max:100'
+]);
+
+if ($v->validation($_POST + $_FILES)) {
+    $data = $v->getData();
+    // $data['post']['title']
+    // $data['post']['content']
+    // $data['tags'] (array)
+    // $data['attachments'] (array of File objects)
+    // $data['poll']['question']
+    // $data['poll']['options'] (array)
+}
+```
+
+## Utility Methods
+
+### reset
+
+```php
+public function reset(): Validator
+```
+
+Resets validator to initial state (clears rules, errors, etc.).
+
+### trim
+
+```php
+public function trim(string $value): string
+```
+
+Trims UTF-8 whitespace from string.
+
+### noValue
+
+```php
+public function noValue(mixed $value, bool $withArray = false): bool
+```
+
+Checks if value is empty (null, empty string, or empty array if `$withArray` is true).
+
+## Best Practices
+
+<Card title="Always Validate CSRF Tokens" icon="shield-check">
+  ```php
+  'token' => 'required|token:FormAction'
+  ```
+  Include token validation in all forms.
+</Card>
+
+<Card title="Use Type Coercion" icon="wand-magic-sparkles">
+  ```php
+  'age' => 'integer'  // "25" → 25
+  'email' => 'string:trim,lower'  // "  USER@EXAMPLE.COM  " → "user@example.com"
+  ```
+  Let the validator sanitize and convert types.
+</Card>
+
+<Card title="Provide Friendly Aliases" icon="user">
+  ```php
+  $v->addAliases(['username' => 'Username', 'email' => 'Email Address']);
+  ```
+  Makes error messages user-friendly.
+</Card>
+
+<Card title="Validate Early" icon="bolt">
+  ```php
+  if (!$v->validation($_POST)) {
+      return $this->c->Message->message($v->getErrors());
+  }
+  ```
+  Validate before any business logic.
+</Card>
+
+<Card title="Exclude Sensitive Data" icon="eye-slash">
+  ```php
+  $data = $v->getData(false, ['password', 'token']);
+  ```
+  Don't include passwords or tokens in returned data.
+</Card>
+
+## See Also
+
+- [Container](/api/container) - Accessing the Validator
+- [User Management](/features/user-management) - User validation examples

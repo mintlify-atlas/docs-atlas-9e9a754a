@@ -1,0 +1,554 @@
+---
+title: Private Messaging
+description: User-to-user private messaging system with conversations, archiving, and blocking
+icon: envelope
+---
+
+## Overview
+
+ForkBB includes a comprehensive private messaging (PM) system that allows users to communicate privately. The system supports conversation-style messaging, archiving, blocking, and read tracking.
+
+## Architecture
+
+The PM system is implemented in `app/Models/PM/PM.php:24` and uses a distinct data structure from public forums:
+
+<CardGroup cols={2}>
+  <Card title="PM Topics" icon="comments">
+    Conversations between two users (PTopic)
+  </Card>
+  
+  <Card title="PM Posts" icon="message">
+    Individual messages within a conversation (PPost)
+  </Card>
+  
+  <Card title="PM Blocks" icon="ban">
+    Users can block others from sending PMs
+  </Card>
+  
+  <Card title="Folders" icon="folder">
+    Inbox, archive, and new messages organization
+  </Card>
+</CardGroup>
+
+## PM Model
+
+### Constants
+
+The PM system uses status constants defined in `app/Models/PM/Cnst.php`:
+
+```php
+const PTOPIC = 1;  // PM Topic type
+const PPOST  = 2;  // PM Post type
+
+const PT_NORMAL  = 0;  // Normal status
+const PT_ARCHIVE = 1;  // Archived
+const PT_DELETED = 2;  // Deleted
+const PT_NOTSENT = 3;  // Not sent (draft)
+
+const ACTION_NEW     = 'new';      // New messages folder
+const ACTION_CURRENT = 'current';  // Inbox folder  
+const ACTION_ARCHIVE = 'archive';  // Archive folder
+```
+
+### Repository Pattern
+
+```php app/Models/PM/PM.php
+public function __construct(Container $container)
+{
+    parent::__construct($container);
+    
+    $this->zDepend = [
+        'area' => ['numPages', 'pagination'],
+        'page' => ['pagination'],
+    ];
+    $this->repository = [
+        Cnst::PTOPIC => [],
+        Cnst::PPOST  => [],
+    ];
+}
+
+protected function checkType(int $type, ?DataModel $model = null): void
+{
+    switch ($type) {
+        case Cnst::PTOPIC:
+            if (
+                null === $model
+                || $model instanceof PTopic
+            ) {
+                return;
+            }
+            break;
+        case Cnst::PPOST:
+            if (
+                null === $model
+                || $model instanceof PPost
+            ) {
+                return;
+            }
+            break;
+    }
+    
+    throw new InvalidArgumentException("Wrong type: {$type}");
+}
+```
+
+## Enabling Private Messaging
+
+PM must be enabled globally and per-group:
+
+```php app/Models/User/User.php
+protected function getusePM(): bool
+{
+    return 1 === $this->c->config->b_pm
+        && (
+            1 === $this->g_pm
+            || $this->isAdmin
+        );
+}
+```
+
+<Info>
+  Administrators always have PM access when the system is enabled, regardless of group settings.
+</Info>
+
+## PM Initialization
+
+The PM system must be initialized for the current user:
+
+```php app/Models/PM/PM.php
+public function init(int|string|null $second = null): self
+{
+    list(
+        $this->idsNew,
+        $this->idsCurrent,
+        $this->idsArchive,
+        $this->totalNew,
+        $this->totalCurrent,
+        $this->totalArchive
+    ) = $this->infoForUser($this->c->user, $second);
+    
+    $this->second     = $second;
+    $this->numNew     = \count($this->idsNew);
+    $this->numCurrent = \count($this->idsCurrent);
+    $this->numArchive = \count($this->idsArchive);
+    
+    return $this;
+}
+```
+
+### User PM Information
+
+```php app/Models/PM/PM.php
+public function infoForUser(User $user, int|string|null $second = null): array
+{
+    $idsNew   = []; // pt_status = PT_NORMAL and last_post > ..._visit
+    $idsCur   = []; // pt_status = PT_NORMAL or last_post > ..._visit
+    $idsArc   = []; // pt_status = PT_ARCHIVE
+    $totalNew = 0;
+    $totalCur = 0;
+    $totalArc = 0;
+    
+    if (
+        $user->isGuest
+        || $user->isUnverified
+    ) {
+        return [$idsNew, $idsCur, $idsArc, $totalNew, $totalCur, $totalArc];
+    }
+    
+    $vars = [
+        ':id'   => $user->id,
+        ':norm' => Cnst::PT_NORMAL,
+        ':arch' => Cnst::PT_ARCHIVE,
+    ];
+    $query = 'SELECT pt.poster, pt.poster_id, pt.poster_status, pt.poster_visit,
+                     pt.target, pt.target_id, pt.target_status, pt.target_visit,
+                     pt.id, pt.last_post
+                FROM ::pm_topics AS pt
+               WHERE (pt.poster_id=?i:id AND pt.poster_status=?i:norm)
+                  OR (pt.poster_id=?i:id AND pt.poster_status=?i:arch)
+                  OR (pt.target_id=?i:id AND pt.target_status=?i:norm)
+                  OR (pt.target_id=?i:id AND pt.target_status=?i:arch)
+            ORDER BY pt.last_post DESC';
+    
+    $stmt = $this->c->DB->query($query, $vars);
+    
+    while ($row = $stmt->fetch()) {
+        $id = $row['id'];
+        $lp = $row['last_post'];
+        
+        // Process poster and target statuses
+        // Sort into new, current, and archive lists
+        // ...
+    }
+    
+    return [$idsNew, $idsCur, $idsArc, $totalNew, $totalCur, $totalArc];
+}
+```
+
+<Note>
+  Each PM conversation has separate status tracking for both participants (poster and target).
+</Note>
+
+## PM Access Control
+
+### Topic Access
+
+```php app/Models/PM/PM.php
+public function accessTopic(int $id): bool
+{
+    return isset($this->idsCurrent[$id]) || isset($this->idsArchive[$id]);
+}
+
+public function inArea(PTopic $topic): ?string
+{
+    if (isset($this->idsArchive[$topic->id])) {
+        return Cnst::ACTION_ARCHIVE;
+    } elseif (isset($this->idsNew[$topic->id])) {
+        return Cnst::ACTION_NEW;
+    } elseif (isset($this->idsCurrent[$topic->id])) {
+        return Cnst::ACTION_CURRENT;
+    } else {
+        return null;
+    }
+}
+```
+
+### Loading PMs
+
+```php app/Models/PM/PM.php
+public function load(int $type, int $id): ?DataModel
+{
+    $this->checkType($type);
+    
+    if ($this->isset($type, $id)) {
+        return $this->get($type, $id);
+    }
+    
+    switch ($type) {
+        case Cnst::PTOPIC:
+            if ($this->accessTopic($id)) {
+                $model = $this->Load->load($type, $id);
+            } else {
+                $model = null;
+            }
+            break;
+        case Cnst::PPOST:
+            $model = $this->Load->load($type, $id);
+            
+            if (
+                $model instanceof PPost
+                && ! $this->accessTopic($model->topic_id)
+            ) {
+                $model = null;
+            }
+            break;
+    }
+    
+    $this->set($type, $id, $model);
+    
+    return $model;
+}
+
+public function loadByIds(int $type, array $ids): array
+{
+    $this->checkType($type);
+    
+    $result = [];
+    $data   = [];
+    
+    foreach ($ids as $id) {
+        if ($this->isset($type, $id)) {
+            $result[$id] = $this->get($type, $id);
+        } else {
+            switch ($type) {
+                case Cnst::PTOPIC:
+                    if (! $this->accessTopic($id)) {
+                        break;
+                    }
+                default:
+                    $data[] = $id;
+            }
+            
+            $result[$id] = null;
+            $this->set($type, $id, null);
+        }
+    }
+    
+    if (empty($data)) {
+        return $result;
+    }
+    
+    foreach ($this->Load->loadByIds($type, $data) as $model) {
+        if ($model instanceof PPost) {
+            if (! $this->accessTopic($model->topic_id)) {
+                continue;
+            }
+        } elseif (! $model instanceof PTopic) {
+            continue;
+        }
+        
+        $result[$model->id] = $model;
+        $this->set($type, $model->id, $model);
+    }
+    
+    return $result;
+}
+```
+
+<Warning>
+  Always check access permissions before loading PM data. Users can only access their own conversations.
+</Warning>
+
+## PM Folders
+
+### Folder Management
+
+```php app/Models/PM/PM.php
+protected function idsList(): array
+{
+    switch ($this->area) {
+        case Cnst::ACTION_NEW:
+            $list = $this->idsNew;
+            break;
+        case Cnst::ACTION_ARCHIVE:
+            $list = $this->idsArchive;
+            break;
+        default:
+            $list = $this->idsCurrent;
+    }
+    
+    if (\is_array($list)) {
+        return $list;
+    }
+    
+    throw new RuntimeException('Init() method was not executed');
+}
+
+protected function setarea(string $area): self
+{
+    switch ($area) {
+        case Cnst::ACTION_NEW:
+        case Cnst::ACTION_CURRENT:
+        case Cnst::ACTION_ARCHIVE:
+            break;
+        default:
+            $area = Cnst::ACTION_CURRENT;
+    }
+    
+    $this->setModelAttr('area', $area);
+    
+    return $this;
+}
+```
+
+### Pagination
+
+```php app/Models/PM/PM.php
+protected function getnumPages(): int
+{
+    return (int) \ceil((\count($this->idsList()) ?: 1) / $this->c->user->disp_topics);
+}
+
+public function hasPage(): bool
+{
+    return \is_int($this->page) && $this->page > 0 && $this->page <= $this->numPages;
+}
+
+protected function getpagination(): array
+{
+    return $this->c->Func->paginate(
+        $this->numPages,
+        $this->page,
+        'PMAction',
+        [
+            'second' => $this->second,
+            'action' => $this->area,
+            'page'   => 'more1',
+        ]
+    );
+}
+
+public function pmListCurPage(): array
+{
+    if (! $this->hasPage()) {
+        throw new InvalidArgumentException('Bad number of displayed page');
+    }
+    
+    $ids = \array_slice(
+        $this->idsList(),
+        ($this->page - 1) * $this->c->user->disp_topics,
+        $this->c->user->disp_topics,
+        true
+    );
+    
+    return $this->loadByIds(Cnst::PTOPIC, \array_keys($ids));
+}
+```
+
+## Creating and Updating PMs
+
+### Creating Models
+
+```php app/Models/PM/PM.php
+public function create(int $type, array $attrs = []): DataModel
+{
+    switch ($type) {
+        case Cnst::PTOPIC:
+            return $this->c->PTopicModel->setModelAttrs($attrs);
+        case Cnst::PPOST:
+            return $this->c->PPostModel->setModelAttrs($attrs);
+        default:
+            throw new InvalidArgumentException("Wrong type: {$type}");
+    }
+}
+```
+
+### Saving PMs
+
+```php app/Models/PM/PM.php
+public function update(int $type, DataModel $model): DataModel
+{
+    $this->checkType($type, $model);
+    
+    return $this->Save->update($model);
+}
+
+public function insert(int $type, DataModel $model): int
+{
+    $this->checkType($type, $model);
+    
+    $id = $this->Save->insert($model);
+    
+    $this->set($type, $id, $model);
+    
+    return $id;
+}
+```
+
+## PM Statistics
+
+User PM counts are tracked and displayed:
+
+```php app/Models/PM/PM.php
+public function recalculate(User $user): void
+{
+    if ($user->isGuest) {
+        return;
+    }
+    
+    list($idsNew, $idsCurrent, $idsArchive, $new, $current, $archive) = $this->infoForUser($user);
+    
+    $user->u_pm_num_new = $new;
+    $user->u_pm_num_all = $current;
+    
+    $this->c->users->update($user);
+}
+```
+
+<Info>
+  PM counts are stored on the user record for efficient display in the UI.
+</Info>
+
+## PM Blocking
+
+Users can block others from sending them PMs using the PBlock model:
+
+```php app/Models/PM/PM.php
+protected function getblock(): PBlock
+{
+    return $this->c->PBlockModel;
+}
+
+protected function setblock(): void
+{
+    throw new RuntimeException('Read-only block property');
+}
+```
+
+## Filtering by User
+
+PMs can be filtered to show conversations with a specific user:
+
+```php
+// Filter by user ID
+$pms->init(123);
+
+// Filter by username (quoted)
+$pms->init('"john_doe"');
+
+// No filter (all conversations)
+$pms->init(null);
+```
+
+The `infoForUser()` method supports this filtering:
+
+```php app/Models/PM/PM.php
+if ($row['poster_id'] === $user->id) {
+    switch ($row['poster_status']) {
+        case Cnst::PT_NORMAL:
+            if (
+                null === $second
+                || $row['target_id'] === $second
+                || '"' . $row['target'] . '"' === $second
+            ) {
+                if ($lp > $row['poster_visit']) {
+                    $idsNew[$id] = $lp;
+                }
+                $idsCur[$id] = $lp;
+            }
+            // ...
+    }
+}
+```
+
+## Privacy and Security
+
+<CardGroup cols={2}>
+  <Card title="User Isolation" icon="lock">
+    Each user can only access their own PM conversations
+  </Card>
+  
+  <Card title="Separate Storage" icon="database">
+    PMs use separate database tables from public posts
+  </Card>
+  
+  <Card title="Blocking" icon="ban">
+    Users can block others from initiating conversations
+  </Card>
+  
+  <Card title="Deletion" icon="trash">
+    Users can delete PMs, which only removes from their view
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Access Control">
+    Always call `init()` before accessing PM data. Check `accessTopic()` before loading PM topics.
+  </Accordion>
+  
+  <Accordion title="Guest Users">
+    Guests and unverified users cannot use the PM system. Always check `usePM` property.
+  </Accordion>
+  
+  <Accordion title="Performance">
+    Use `loadByIds()` for batch loading. Cache PM counts on user records rather than querying each request.
+  </Accordion>
+  
+  <Accordion title="Status Tracking">
+    Remember that each conversation has independent status for poster and target. Handle both sides when updating.
+  </Accordion>
+</AccordionGroup>
+
+## Related Features
+
+<CardGroup cols={2}>
+  <Card title="User Management" icon="users" href="/features/user-management">
+    Learn about user accounts and permissions
+  </Card>
+  
+  <Card title="BBCode" icon="code" href="/features/bbcode">
+    Format PM messages with BBCode
+  </Card>
+</CardGroup>

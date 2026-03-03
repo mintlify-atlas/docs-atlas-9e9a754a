@@ -1,0 +1,697 @@
+---
+title: Database
+description: PDO abstraction layer with placeholder support and query tracking
+---
+
+The `DB` class is ForkBB's database abstraction layer, extending PDO with typed placeholders, automatic query tracking, and simplified query building.
+
+## Overview
+
+The Database class provides:
+- **Typed Placeholders** - Enhanced parameter binding (`?i`, `?s`, `?ai`, etc.)
+- **Query Tracking** - Automatic performance monitoring
+- **Table Prefixes** - Automatic table name substitution (`::table`)
+- **Transaction Support** - Built-in transaction management
+- **Driver Support** - MySQL, PostgreSQL, SQLite
+
+<Note>
+Access via Container: `$this->c->DB` (shared singleton instance)
+</Note>
+
+## Constructor
+
+```php
+public function __construct(
+    string $dsn,
+    ?string $username = null,
+    ?string $password = null,
+    array $options = [],
+    string $prefix = ''
+)
+```
+
+<ParamField path="dsn" type="string" required>
+  PDO Data Source Name (e.g., `mysql:host=localhost;dbname=forkbb`)
+</ParamField>
+
+<ParamField path="username" type="string">
+  Database username
+</ParamField>
+
+<ParamField path="password" type="string">
+  Database password (marked sensitive)
+</ParamField>
+
+<ParamField path="options" type="array" default="[]">
+  PDO options plus custom options:
+  - `initSQLCommands` - Commands to run on connect
+  - `initFunction` - Callback to run after connect
+</ParamField>
+
+<ParamField path="prefix" type="string" default="''">
+  Table prefix (e.g., `fork_`)
+</ParamField>
+
+**Example:**
+
+```php
+$db = new DB(
+    'mysql:host=localhost;dbname=forkbb;charset=utf8mb4',
+    'username',
+    'password',
+    [
+        'initSQLCommands' => [
+            'SET NAMES utf8mb4',
+            'SET time_zone = \'+00:00\''
+        ],
+        PDO::ATTR_TIMEOUT => 5
+    ],
+    'fork_'
+);
+```
+
+## Query Methods
+
+### query
+
+```php
+public function query(string $query, mixed ...$args): DBStatement|false
+```
+
+Executes a query and returns a statement object.
+
+<ParamField path="query" type="string" required>
+  SQL query with typed placeholders
+</ParamField>
+
+<ParamField path="args" type="mixed">
+  Parameters array as first argument, or PDO fetch mode arguments
+</ParamField>
+
+<ResponseField name="return" type="DBStatement|false">
+  Statement object or false on failure
+</ResponseField>
+
+**Simple Query:**
+
+```php
+$stmt = $this->c->DB->query('SELECT * FROM ::users WHERE id = ?i', [42]);
+$user = $stmt->fetch();
+```
+
+**Multiple Parameters:**
+
+```php
+$stmt = $this->c->DB->query(
+    'SELECT * FROM ::posts WHERE forum_id = ?i AND topic_id = ?i LIMIT ?i',
+    [5, 123, 10]
+);
+```
+
+**Named Parameters:**
+
+```php
+$stmt = $this->c->DB->query(
+    'SELECT * FROM ::users WHERE username = :username AND email = :email',
+    [':username' => 'john', ':email' => 'john@example.com']
+);
+```
+
+**With Fetch Mode:**
+
+```php
+$stmt = $this->c->DB->query(
+    'SELECT * FROM ::users',
+    [],
+    PDO::FETCH_CLASS,
+    User::class
+);
+```
+
+### exec
+
+```php
+public function exec(string $query, array $params = []): int|false
+```
+
+Executes a query and returns affected row count.
+
+<ParamField path="query" type="string" required>
+  SQL query (INSERT, UPDATE, DELETE)
+</ParamField>
+
+<ParamField path="params" type="array" default="[]">
+  Query parameters
+</ParamField>
+
+<ResponseField name="return" type="int|false">
+  Number of affected rows or false on failure
+</ResponseField>
+
+**Insert:**
+
+```php
+$affected = $this->c->DB->exec(
+    'INSERT INTO ::users (username, email, registered) VALUES (?s, ?s, ?i)',
+    ['john', 'john@example.com', time()]
+);
+
+$userId = $this->c->DB->lastInsertId();
+```
+
+**Update:**
+
+```php
+$affected = $this->c->DB->exec(
+    'UPDATE ::users SET last_visit = ?i WHERE id = ?i',
+    [time(), 42]
+);
+```
+
+**Delete:**
+
+```php
+$affected = $this->c->DB->exec(
+    'DELETE FROM ::posts WHERE topic_id = ?i',
+    [123]
+);
+```
+
+### prepare
+
+```php
+public function prepare(string $query, array $params = [], array $options = []): DBStatement|false
+```
+
+Prepares a statement for execution.
+
+<ParamField path="query" type="string" required>
+  SQL query with placeholders
+</ParamField>
+
+<ParamField path="params" type="array" default="[]">
+  Parameters for placeholder parsing
+</ParamField>
+
+<ParamField path="options" type="array" default="[]">
+  PDO driver options
+</ParamField>
+
+<ResponseField name="return" type="DBStatement|false">
+  Prepared statement or false on failure
+</ResponseField>
+
+**Example:**
+
+```php
+$stmt = $this->c->DB->prepare(
+    'SELECT * FROM ::users WHERE group_id = ?i AND registered > ?i'
+);
+
+// Execute multiple times with different parameters
+foreach ($groups as $groupId) {
+    $stmt->execute([$groupId, $timestamp]);
+    while ($user = $stmt->fetch()) {
+        // Process user
+    }
+}
+```
+
+## Placeholder Types
+
+The DB class extends PDO with typed placeholders:
+
+### Scalar Placeholders
+
+<ParamField path="?s" type="placeholder">
+  String value
+  ```php
+  'WHERE username = ?s'
+  ```
+</ParamField>
+
+<ParamField path="?i" type="placeholder">
+  Integer value
+  ```php
+  'WHERE id = ?i'
+  ```
+</ParamField>
+
+<ParamField path="?f" type="placeholder">
+  Float value
+  ```php
+  'WHERE price = ?f'
+  ```
+</ParamField>
+
+<ParamField path="?b" type="placeholder">
+  Boolean value
+  ```php
+  'WHERE is_active = ?b'
+  ```
+</ParamField>
+
+<ParamField path="?p" type="placeholder">
+  Plain value (not escaped, use with caution)
+  ```php
+  'ORDER BY ?p'  // For dynamic column names
+  ```
+  <Warning>Only use `?p` with trusted, validated input!</Warning>
+</ParamField>
+
+### Array Placeholders
+
+<ParamField path="?ai" type="placeholder">
+  Array of integers
+  ```php
+  'WHERE id IN (?ai)'
+  $db->query($sql, [[1, 2, 3]])
+  // Expands to: WHERE id IN (1, 2, 3)
+  ```
+</ParamField>
+
+<ParamField path="?as" type="placeholder">
+  Array of strings
+  ```php
+  'WHERE username IN (?as)'
+  $db->query($sql, [['john', 'jane', 'bob']])
+  // Expands to: WHERE username IN ('john', 'jane', 'bob')
+  ```
+</ParamField>
+
+<ParamField path="?a" type="placeholder">
+  Generic array (auto-detect type)
+  ```php
+  'WHERE id IN (?a)'
+  ```
+</ParamField>
+
+### Named Placeholders
+
+```php
+// Named parameters use same type suffixes
+'WHERE id = :id|i AND username = :name|s'
+
+$db->query($sql, [
+    ':id' => 42,
+    ':name' => 'john'
+]);
+```
+
+### Table Prefix Placeholder
+
+<ParamField path="::table" type="placeholder">
+  Automatic table prefix substitution
+  ```php
+  'SELECT * FROM ::users'  // Becomes: fork_users
+  'JOIN ::posts ON ::users.id = ::posts.user_id'
+  ```
+</ParamField>
+
+## Transaction Methods
+
+### beginTransaction
+
+```php
+public function beginTransaction(): bool
+```
+
+Starts a new transaction.
+
+**Example:**
+
+```php
+$this->c->DB->beginTransaction();
+
+try {
+    $this->c->DB->exec('INSERT INTO ::topics ...', [...]);
+    $topicId = $this->c->DB->lastInsertId();
+    
+    $this->c->DB->exec('INSERT INTO ::posts ...', [...]);
+    
+    $this->c->DB->commit();
+} catch (Exception $e) {
+    $this->c->DB->rollback();
+    throw $e;
+}
+```
+
+### commit
+
+```php
+public function commit(): bool
+```
+
+Commits the active transaction.
+
+### rollback
+
+```php
+public function rollback(): bool
+```
+
+Rolls back the active transaction.
+
+## Query Tracking
+
+### getCount
+
+```php
+public function getCount(): int
+```
+
+Returns the number of executed queries.
+
+**Example:**
+
+```php
+$count = $this->c->DB->getCount();
+echo "Executed {$count} queries";
+```
+
+### getQueries
+
+```php
+public function getQueries(): array
+```
+
+Returns array of executed queries with timing.
+
+<ResponseField name="return" type="array">
+  Array of `[query, execution_time]` pairs
+</ResponseField>
+
+**Example:**
+
+```php
+$queries = $this->c->DB->getQueries();
+foreach ($queries as [$sql, $time]) {
+    echo "Query: {$sql} ({$time}s)\n";
+}
+```
+
+### getLifeTime
+
+```php
+public function getLifeTime(): float
+```
+
+Returns approximate lifetime of the DB connection in seconds.
+
+**Example:**
+
+```php
+$lifetime = $this->c->DB->getLifeTime();
+echo "DB connection active for {$lifetime}s";
+```
+
+## Utility Methods
+
+### getType
+
+```php
+public function getType(): string
+```
+
+Returns database type ('mysql', 'pgsql', 'sqlite').
+
+**Example:**
+
+```php
+$type = $this->c->DB->getType();
+if ($type === 'mysql') {
+    // MySQL-specific code
+}
+```
+
+### getValue
+
+```php
+public function getValue(int|string $key, array $params): mixed
+```
+
+Retrieves a parameter value by key or throws exception.
+
+### lastInsertId
+
+```php
+public function lastInsertId(string $name = null): string
+```
+
+Returns the last inserted ID.
+
+**Example:**
+
+```php
+$this->c->DB->exec('INSERT INTO ::users ...', [...]);
+$userId = (int) $this->c->DB->lastInsertId();
+```
+
+### disconnect
+
+```php
+public function disconnect(): void
+```
+
+Closes the database connection.
+
+## Real-World Examples
+
+### User CRUD Operations
+
+```php
+// Create
+$this->c->DB->exec(
+    'INSERT INTO ::users (username, email, registered, group_id) VALUES (?s, ?s, ?i, ?i)',
+    [$username, $email, time(), 4]
+);
+$userId = (int) $this->c->DB->lastInsertId();
+
+// Read
+$user = $this->c->DB->query(
+    'SELECT * FROM ::users WHERE id = ?i',
+    [$userId]
+)->fetch();
+
+// Update
+$this->c->DB->exec(
+    'UPDATE ::users SET last_visit = ?i, num_posts = num_posts + 1 WHERE id = ?i',
+    [time(), $userId]
+);
+
+// Delete
+$this->c->DB->exec(
+    'DELETE FROM ::users WHERE id = ?i',
+    [$userId]
+);
+```
+
+### Complex Queries
+
+```php
+// JOIN with multiple conditions
+$posts = $this->c->DB->query(
+    'SELECT p.*, t.subject, u.username
+     FROM ::posts AS p
+     INNER JOIN ::topics AS t ON p.topic_id = t.id
+     INNER JOIN ::users AS u ON p.poster_id = u.id
+     WHERE t.forum_id = ?i AND p.posted > ?i
+     ORDER BY p.posted DESC
+     LIMIT ?i',
+    [$forumId, $timestamp, 50]
+)->fetchAll();
+
+// Aggregate with GROUP BY
+$stats = $this->c->DB->query(
+    'SELECT forum_id, COUNT(*) as topic_count, SUM(num_posts) as post_count
+     FROM ::topics
+     WHERE closed = ?i
+     GROUP BY forum_id
+     HAVING topic_count > ?i',
+    [0, 10]
+)->fetchAll();
+```
+
+### Array Placeholders
+
+```php
+// IN clause with array
+$users = $this->c->DB->query(
+    'SELECT * FROM ::users WHERE id IN (?ai)',
+    [[1, 5, 10, 42]]
+)->fetchAll();
+
+// Multiple arrays
+$results = $this->c->DB->query(
+    'SELECT * FROM ::posts WHERE topic_id IN (?ai) AND poster_id NOT IN (?ai)',
+    [[10, 20, 30], [5, 7]]
+)->fetchAll();
+```
+
+### Batch Operations
+
+```php
+// Insert multiple records
+$stmt = $this->c->DB->prepare(
+    'INSERT INTO ::search_words (word, topic_ids) VALUES (?s, ?s)'
+);
+
+foreach ($words as $word => $topicIds) {
+    $stmt->execute([$word, implode(',', $topicIds)]);
+}
+```
+
+### Transaction Example
+
+```php
+$this->c->DB->beginTransaction();
+
+try {
+    // Create topic
+    $this->c->DB->exec(
+        'INSERT INTO ::topics (subject, forum_id, posted, poster_id) VALUES (?s, ?i, ?i, ?i)',
+        [$subject, $forumId, $now, $userId]
+    );
+    $topicId = (int) $this->c->DB->lastInsertId();
+    
+    // Create first post
+    $this->c->DB->exec(
+        'INSERT INTO ::posts (topic_id, poster_id, posted, message) VALUES (?i, ?i, ?i, ?s)',
+        [$topicId, $userId, $now, $message]
+    );
+    $postId = (int) $this->c->DB->lastInsertId();
+    
+    // Update topic with first post ID
+    $this->c->DB->exec(
+        'UPDATE ::topics SET first_post_id = ?i, last_post_id = ?i WHERE id = ?i',
+        [$postId, $postId, $topicId]
+    );
+    
+    // Update forum stats
+    $this->c->DB->exec(
+        'UPDATE ::forums SET num_topics = num_topics + 1, num_posts = num_posts + 1 WHERE id = ?i',
+        [$forumId]
+    );
+    
+    $this->c->DB->commit();
+} catch (Exception $e) {
+    $this->c->DB->rollback();
+    throw new RuntimeException('Failed to create topic', 0, $e);
+}
+```
+
+### Search Implementation
+
+```php
+$keywords = ['php', 'database', 'pdo'];
+
+// Dynamic query building
+$conditions = [];
+$params = [];
+
+foreach ($keywords as $keyword) {
+    $conditions[] = 'message LIKE ?s';
+    $params[] = "%{$keyword}%";
+}
+
+$sql = 'SELECT * FROM ::posts WHERE ' . implode(' OR ', $conditions) . ' LIMIT ?i';
+$params[] = 50;
+
+$results = $this->c->DB->query($sql, $params)->fetchAll();
+```
+
+## Performance Tips
+
+<Card title="Use Prepared Statements" icon="bolt">
+  ```php
+  $stmt = $this->c->DB->prepare('SELECT * FROM ::users WHERE group_id = ?i');
+  foreach ($groups as $groupId) {
+      $stmt->execute([$groupId]);
+  }
+  ```
+  Reuse prepared statements for repeated queries.
+</Card>
+
+<Card title="Monitor Query Count" icon="gauge">
+  ```php
+  $count = $this->c->DB->getCount();
+  if ($count > 50) {
+      // Log warning: too many queries
+  }
+  ```
+  Track queries to identify N+1 problems.
+</Card>
+
+<Card title="Use Array Placeholders" icon="list">
+  ```php
+  // Good: Single query
+  WHERE id IN (?ai)
+  
+  // Bad: Multiple queries
+  foreach ($ids as $id) { WHERE id = ?i }
+  ```
+  Batch operations when possible.
+</Card>
+
+<Card title="Wrap Multi-Step Operations" icon="layer-group">
+  ```php
+  $this->c->DB->beginTransaction();
+  // Multiple related queries
+  $this->c->DB->commit();
+  ```
+  Use transactions for data consistency.
+</Card>
+
+## Error Handling
+
+The DB class throws `PDOException` on errors:
+
+```php
+try {
+    $this->c->DB->exec('INVALID SQL', []);
+} catch (PDOException $e) {
+    error_log("Database error: " . $e->getMessage());
+    throw new RuntimeException('Database operation failed', 0, $e);
+}
+```
+
+## Security Notes
+
+<Warning>
+**Never concatenate user input into SQL queries!**
+
+```php
+// DANGEROUS - SQL Injection vulnerability
+$sql = "SELECT * FROM users WHERE username = '{$_POST['username']}'";
+
+// SAFE - Use placeholders
+$sql = 'SELECT * FROM ::users WHERE username = ?s';
+$this->c->DB->query($sql, [$_POST['username']]);
+```
+</Warning>
+
+<Warning>
+**Use `?p` placeholder only with validated input:**
+
+```php
+// Safe: Whitelist validation
+$allowedColumns = ['username', 'email', 'registered'];
+$orderBy = in_array($_GET['sort'], $allowedColumns) ? $_GET['sort'] : 'registered';
+$this->c->DB->query('SELECT * FROM ::users ORDER BY ?p', [$orderBy]);
+```
+</Warning>
+
+## Best Practices
+
+1. **Use typed placeholders** - Specify types (`?i`, `?s`) for clarity and safety
+2. **Leverage table prefixes** - Always use `::table` notation
+3. **Monitor performance** - Check query count and timing in development
+4. **Use transactions** - Wrap related operations for consistency
+5. **Prepare repeated queries** - Prepare once, execute multiple times
+6. **Handle errors** - Catch PDOException and provide context
+
+## See Also
+
+- [Container](/api/container) - Accessing the DB service
+- [Models](/models) - Database model layer
+- [Architecture](/architecture) - System architecture overview
